@@ -1,0 +1,27 @@
+export {
+  COMPLETE_MARKER,
+  DEFAULT_PREFIX,
+  SCHEMA_SIDECAR,
+  dumpDatabase,
+  runIdFor,
+  type CompleteMarker,
+  type DumpOptions,
+  type DumpResult,
+  type DumpedTable,
+  type PagedTable,
+  type SchemaSidecar,
+} from "./dump.js";
+export { restoreDump, type RestoreOptions, type RestoreResult } from "./restore.js";
+export {
+  DEFAULT_MIN_KEPT,
+  DEFAULT_RETENTION_DAYS,
+  DEFAULT_STALE_HOURS,
+  backupHealth,
+  latestDump,
+  pruneDumps,
+  type BackupHealth,
+  type LatestDump,
+  type PruneResult,
+} from "./runs.js";
+export { readPlan, type FtsMode, type FtsTable, type Plan, type SchemaEntry } from "./schema.js";
+export type { D1Like, D1Statement, R2Like } from "./types.js";
