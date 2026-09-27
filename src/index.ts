@@ -4,6 +4,7 @@ export {
   SCHEMA_SIDECAR,
   dumpDatabase,
   runIdFor,
+  writeCompleteMarker,
   type CompleteMarker,
   type DumpOptions,
   type DumpResult,
