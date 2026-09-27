@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { COMPLETE_MARKER, dumpDatabase, readPlan, restoreDump, type D1Like, type R2Like } from "../src/index.js";
+import { COMPLETE_MARKER, dumpDatabase, readPlan, restoreDump, writeCompleteMarker, type D1Like, type R2Like } from "../src/index.js";
 import { SITE_ROWS, SITE_SCHEMA, exec, rows, sandbox } from "./helpers.js";
 
 let src: D1Like;
@@ -110,6 +110,23 @@ test("sidecars are written before the marker and listed in it", async () => {
   expect(marker.keys).toContain(`${dumped.prefix}_kv.json`);
   expect(JSON.parse(await (await bucket.get(`${dumped.prefix}_kv.json`))!.text())).toEqual({ exported_at: NOW.toISOString(), keys: { mode: "off" } });
   await expect(dumpDatabase(src, bucket, { sidecars: { complete: {} } })).rejects.toThrow(/reserved/);
+});
+
+test("markComplete: false writes every object but the marker, and writeCompleteMarker completes the run once", async () => {
+  const dumped = await dumpDatabase(src, bucket, { now: NOW, markComplete: false });
+  expect(dumped.complete).toBe(false);
+  expect(dumped.keys.some((k) => k.endsWith(COMPLETE_MARKER))).toBe(false);
+  expect(await bucket.get(`${dumped.prefix}${COMPLETE_MARKER}`)).toBeNull();
+  await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(/not a complete dump/);
+
+  const key = await writeCompleteMarker(bucket, dumped);
+  expect(key).toBe(`${dumped.prefix}${COMPLETE_MARKER}`);
+  expect(dumped.complete).toBe(true);
+  expect(dumped.keys.at(-1)).toBe(key);
+  const marker = JSON.parse(await (await bucket.get(key))!.text());
+  expect(marker.keys).toEqual(dumped.keys.slice(0, -1));
+  expect((await restoreDump(dst, bucket, dumped.prefix)).tables.length).toBe(dumped.tables.length);
+  await expect(writeCompleteMarker(bucket, dumped)).rejects.toThrow(/already marked complete/);
 });
 
 test("the plan puts a parent table before the tables that reference it", async () => {

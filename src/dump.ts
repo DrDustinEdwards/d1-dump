@@ -27,6 +27,10 @@ export interface DumpOptions {
   exclude?: string[];
   // Extra JSON objects written as _<name>.json beside the tables, before the marker.
   sidecars?: Record<string, unknown>;
+  // false leaves the marker unwritten, so the caller can run its own checks on the dump
+  // and then call writeCompleteMarker, or leave the run incomplete when a check fails.
+  // Defaults to true.
+  markComplete?: boolean;
 }
 
 export interface DumpedTable {
@@ -42,7 +46,11 @@ export interface DumpResult {
   keys: string[];
   tables: DumpedTable[];
   fts: FtsTable[];
+  excluded: string[];
   shadow_skipped: string[];
+  // Whether _complete.json was written. When false, `keys` lists every object written
+  // and no marker.
+  complete: boolean;
 }
 
 export interface CompleteMarker {
@@ -144,10 +152,32 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
     keys.push(key);
   }
 
-  const marker: CompleteMarker = { exported_at: exportedAt, keys: [...keys], tables, fts: plan.fts, excluded: exclude };
-  await bucket.put(`${runPrefix}${COMPLETE_MARKER}`, JSON.stringify(marker), JSON_TYPE);
-  keys.push(`${runPrefix}${COMPLETE_MARKER}`);
-  return { run_id: runId, prefix: runPrefix, exported_at: exportedAt, keys, tables, fts: plan.fts, shadow_skipped: plan.shadow };
+  const result: DumpResult = {
+    run_id: runId,
+    prefix: runPrefix,
+    exported_at: exportedAt,
+    keys,
+    tables,
+    fts: plan.fts,
+    excluded: exclude,
+    shadow_skipped: plan.shadow,
+    complete: false,
+  };
+  if (options.markComplete ?? true) await writeCompleteMarker(bucket, result);
+  return result;
+}
+
+// Writes the run's _complete.json, listing every object the run wrote, and marks the
+// result complete. For a dump made with markComplete: false once the caller's own
+// checks pass. Refuses a result already marked.
+export async function writeCompleteMarker(bucket: R2Like, result: DumpResult): Promise<string> {
+  if (result.complete) throw new Error(`d1-dump: ${result.prefix} is already marked complete`);
+  const key = `${result.prefix}${COMPLETE_MARKER}`;
+  const marker: CompleteMarker = { exported_at: result.exported_at, keys: [...result.keys], tables: result.tables, fts: result.fts, excluded: result.excluded };
+  await bucket.put(key, JSON.stringify(marker), JSON_TYPE);
+  result.keys.push(key);
+  result.complete = true;
+  return key;
 }
 
 function sidecarsOf(options: DumpOptions): Record<string, unknown> {

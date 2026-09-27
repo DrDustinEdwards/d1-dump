@@ -9,7 +9,7 @@ It is Capsid's nightly dump (`src/backup.ts` in DrDustinEdwards/capsid), made in
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.1.0
+npm install github:DrDustinEdwards/d1-dump#v0.1.1
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -56,6 +56,19 @@ await restoreDump(env.SCRATCH_DB, env.BACKUPS, latest.prefix); // into an EMPTY 
 ```
 
 `restoreDump` creates the tables, inserts the rows parents first under `PRAGMA defer_foreign_keys`, rebuilds external FTS5 indexes, and only then creates indexes, triggers and views, so no trigger fires on restored rows. It checks every table's count against the marker and throws on a mismatch.
+
+**Size limit.** `restoreDump` reads one table's file whole and holds it with its parsed rows. Paging applies only to the dump. A Worker isolate has 128 MB for the JavaScript heap and WebAssembly together (developers.cloudflare.com/workers/platform/limits). So a table whose file approaches that size, which is what `paged` exists for, will not restore inside a Worker. Restore it from Node instead, against a local D1 through Miniflare as the tests do, or split the file. The restore holds one table at a time, so it is the largest table that sets the limit, not the whole database.
+
+## Complete only after your own checks
+
+```ts
+import { dumpDatabase, writeCompleteMarker } from "@dustinedwards/d1-dump";
+
+const dump = await dumpDatabase(env.DB, env.BACKUPS, { markComplete: false });
+if (await looksHealthy(env.DB)) await writeCompleteMarker(env.BACKUPS, dump);
+```
+
+A run left without its marker keeps its objects as evidence of what the database held that day. It is never the newest dump `latestDump` returns, and it holds no slot in the retention floor.
 
 ## Tests
 

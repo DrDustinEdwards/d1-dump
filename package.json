@@ -1,6 +1,6 @@
 {
   "name": "@dustinedwards/d1-dump",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "A per-table D1 dump into the site's own R2 bucket, which works where wrangler d1 export fails on FTS5, with a restore and a backup-age reading for health.",
   "license": "MIT",
