@@ -7,30 +7,6 @@ const R2_DELETE_MAX = 1000;
 
 export const JSON_TYPE = { httpMetadata: { contentType: "application/json" } };
 
-// BLOB columns do not survive JSON as they arrive, so they are written as
-// {"$blob": "<base64>"} and decoded on restore. A text column never reads back as an
-// array or a buffer, so either one here is a BLOB.
-// btoa and atob rather than Buffer, which a Worker has only with nodejs_compat.
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(binary);
-}
-
-export function encodeValue(_key: string, value: unknown): unknown {
-  if (value instanceof ArrayBuffer) return { $blob: toBase64(new Uint8Array(value)) };
-  if (ArrayBuffer.isView(value)) return { $blob: toBase64(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)) };
-  if (Array.isArray(value) && value.every((n) => typeof n === "number")) return { $blob: toBase64(Uint8Array.from(value)) };
-  return value;
-}
-
-export function decodeValue(value: unknown): unknown {
-  if (value && typeof value === "object" && !Array.isArray(value) && typeof (value as { $blob?: unknown }).$blob === "string") {
-    return Uint8Array.from(atob((value as { $blob: string }).$blob), (c) => c.charCodeAt(0));
-  }
-  return value;
-}
-
 // Writes `head`, then the rows a page at a time, then "]}", as one multipart object.
 // The bytes equal JSON.stringify of the whole object, holding at most one part and one
 // page in memory.
@@ -60,7 +36,7 @@ export async function putJsonStreamed(bucket: R2Like, key: string, head: string,
     await write(head);
     for await (const page of pages) {
       for (const row of page) {
-        await write((rows === 0 ? "" : ",") + JSON.stringify(row, encodeValue));
+        await write((rows === 0 ? "" : ",") + JSON.stringify(row));
         rows++;
       }
     }

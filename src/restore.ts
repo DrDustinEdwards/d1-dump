@@ -1,5 +1,4 @@
 import { COMPLETE_MARKER, SCHEMA_SIDECAR, type CompleteMarker, type SchemaSidecar } from "./dump.js";
-import { decodeValue } from "./r2.js";
 import { quoteIdent } from "./schema.js";
 import type { D1Like, D1Statement, R2Like } from "./types.js";
 
@@ -50,7 +49,7 @@ export async function restoreDump(db: D1Like, bucket: R2Like, runPrefix: string,
       const sql = `INSERT INTO ${quoteIdent(table.name)} (${columns.map(quoteIdent).join(", ")}) VALUES (${columns.map((_, i) => `?${i + 1}`).join(", ")})`;
       for (let i = 0; i < rows.length; i += batchRows) {
         const statements: D1Statement[] = [db.prepare("PRAGMA defer_foreign_keys = ON")];
-        for (const row of rows.slice(i, i + batchRows)) statements.push(db.prepare(sql).bind(...columns.map((c) => decodeValue(row[c]))));
+        for (const row of rows.slice(i, i + batchRows)) statements.push(db.prepare(sql).bind(...columns.map((c) => row[c])));
         await db.batch(statements);
       }
     }

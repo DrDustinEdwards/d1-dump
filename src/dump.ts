@@ -1,4 +1,4 @@
-import { JSON_TYPE, encodeValue, putJsonStreamed } from "./r2.js";
+import { JSON_TYPE, putJsonStreamed } from "./r2.js";
 import { quoteIdent, readPlan, type FtsTable, type SchemaEntry } from "./schema.js";
 import type { D1Like, R2Like } from "./types.js";
 
@@ -126,7 +126,7 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
         ? await putJsonStreamed(bucket, key, head, (async function* () {})())
         : await putJsonStreamed(bucket, key, head, pages(db, table, p.idColumn, maxId, p.pageRows));
     } else {
-      await bucket.put(key, JSON.stringify({ exported_at: exportedAt, table, rows: results }, encodeValue), JSON_TYPE);
+      await bucket.put(key, JSON.stringify({ exported_at: exportedAt, table, rows: results }), JSON_TYPE);
       rows = results.length;
     }
     keys.push(key);

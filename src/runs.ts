@@ -31,7 +31,6 @@ export interface LatestDump {
 export async function latestDump(bucket: R2Like, options: { prefix?: string } = {}): Promise<LatestDump | null> {
   const prefix = options.prefix ?? DEFAULT_PREFIX;
   for (const run of await runsOf(bucket, prefix)) {
-    if (!run.complete) continue;
     const obj = await bucket.get(`${prefix}${run.id}/${COMPLETE_MARKER}`);
     if (!obj) continue;
     const marker = JSON.parse(await obj.text()) as CompleteMarker;
