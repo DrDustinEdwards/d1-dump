@@ -36,6 +36,30 @@ async function readJson<T>(bucket: R2Like, key: string): Promise<T> {
   return JSON.parse(await obj.text()) as T;
 }
 
+// The columns the restored table has, from the CREATE statement in _schema.json that was
+// just run. An internal FTS5 table is dumped with its rowid too.
+async function schemaColumns(db: D1Like, table: string, internalFts: boolean): Promise<string[]> {
+  const { results } = await db.prepare(`PRAGMA table_info(${quoteIdent(table)})`).all<{ name: string }>();
+  const columns = results.map((c) => c.name);
+  if (columns.length === 0) throw new Error(`d1-dump: ${table} has no columns after its CREATE statement ran`);
+  return internalFts ? ["rowid", ...columns] : columns;
+}
+
+// Every row must carry exactly the schema's columns. Comparing to the first row instead
+// would pass a column missing from all of them, which restores as NULL or as a default.
+function checkColumns(table: string, columns: string[], rows: Array<Record<string, unknown>>): void {
+  const expected = new Set(columns);
+  for (let i = 0; i < rows.length; i++) {
+    const keys = Object.keys(rows[i]);
+    if (keys.length === columns.length && keys.every((k) => expected.has(k))) continue;
+    const lacks = columns.filter((c) => !(c in rows[i]));
+    const extra = keys.filter((k) => !expected.has(k));
+    throw new Error(
+      `d1-dump: ${table} row ${i} does not match the schema's columns (lacks: ${lacks.join(", ") || "none"}; not in the schema: ${extra.join(", ") || "none"})`
+    );
+  }
+}
+
 // Rebuilds one complete dump into `db`, which should be empty. Tables and FTS5 tables
 // first, then the rows (parents before children), then each external FTS5 index is
 // rebuilt, then indexes, triggers and views, so no trigger fires on restored rows.
@@ -50,13 +74,15 @@ export async function restoreDump(db: D1Like, bucket: R2Like, runPrefix: string,
   const batchBytes = options.batchBytes ?? DEFAULT_BATCH_BYTES;
 
   for (const e of schema.filter((s) => s.type === "table")) await db.prepare(e.sql).run();
+  const internalFts = new Set(marker.fts.filter((f) => f.mode === "internal").map((f) => f.name));
 
   const restored: RestoreResult["tables"] = [];
   for (const table of marker.tables) {
     const { rows } = await readJson<{ rows: Array<Record<string, unknown>> }>(bucket, table.key);
     if (rows.length !== table.rows) throw new Error(`d1-dump: ${table.key} holds ${rows.length} rows, the marker says ${table.rows}`);
     if (rows.length > 0) {
-      const columns = Object.keys(rows[0]);
+      const columns = await schemaColumns(db, table.name, internalFts.has(table.name));
+      checkColumns(table.name, columns, rows);
       if (columns.length > D1_MAX_PARAMS) throw new Error(`d1-dump: ${table.name} has ${columns.length} columns, over D1's ${D1_MAX_PARAMS} bound parameters`);
       const sql = `INSERT INTO ${quoteIdent(table.name)} (${columns.map(quoteIdent).join(", ")}) VALUES (${columns.map((_, i) => `?${i + 1}`).join(", ")})`;
       let statements: D1Statement[] = [];
