@@ -9,7 +9,7 @@ It is Capsid's nightly dump (`src/backup.ts` in DrDustinEdwards/capsid), made in
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.1.1
+npm install github:DrDustinEdwards/d1-dump#v0.3.0
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -55,7 +55,7 @@ const latest = await latestDump(env.BACKUPS);
 await restoreDump(env.SCRATCH_DB, env.BACKUPS, latest.prefix); // into an EMPTY database
 ```
 
-`restoreDump` creates the tables, inserts the rows parents first under `PRAGMA defer_foreign_keys`, rebuilds external FTS5 indexes, and only then creates indexes, triggers and views, so no trigger fires on restored rows. It checks every table's count against the marker and throws on a mismatch.
+`restoreDump` creates the tables, refuses any table whose rows do not carry exactly the columns its `CREATE` statement in `_schema.json` has (a column missing from every row is caught, not only one missing from some), inserts the rows parents first under `PRAGMA defer_foreign_keys`, rebuilds external FTS5 indexes, and only then creates indexes, triggers and views, so no trigger fires on restored rows. It checks every table's count against the marker and throws on a mismatch.
 
 **Size limit.** `restoreDump` reads one table's file whole and holds it with its parsed rows. Paging applies only to the dump. A Worker isolate has 128 MB for the JavaScript heap and WebAssembly together (developers.cloudflare.com/workers/platform/limits). So a table whose file approaches that size, which is what `paged` exists for, will not restore inside a Worker. Restore it from Node instead, against a local D1 through Miniflare as the tests do, or split the file. The restore holds one table at a time, so it is the largest table that sets the limit, not the whole database.
 
@@ -72,7 +72,7 @@ A run left without its marker keeps its objects as evidence of what the database
 
 ## Restore drill
 
-A backup is proven by restoring it. The drill restores a dump into a scratch D1 database it creates, checks the copy, and deletes the scratch database whatever the outcome. It replaces the restore rehearsals each site kept for itself.
+A backup is proven by restoring it. The drill restores a dump into a scratch database it creates, checks the copy, and deletes the scratch database whatever the outcome. It replaces the restore rehearsals each site kept for itself. It has two backends: **sqlite**, a local SQLite file that needs no credential, for the weekly run; and **d1**, a scratch D1 database, for a run by hand.
 
 ```ts
 import { runRestoreDrill } from "@dustinedwards/d1-dump";
@@ -86,10 +86,13 @@ if (!result.ok) throw new Error(result.checks.filter((c) => !c.ok).map((c) => `$
 From Node or CI, against a dump downloaded to a directory (`<dir>/backups/json/<run id>/...`):
 
 ```sh
-CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... npx d1-dump drill --dir ./dump
+npx d1-dump drill --dir ./dump                                  # sqlite, no credential
+CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... npx d1-dump drill --dir ./dump --backend d1
 ```
 
-The token needs to create and delete D1 databases. It is read from the environment, sent only as the Authorization header, and never printed. `--prefix backups/json/<run id>/` pins a run (the newest complete one is used otherwise) and `--max-age-hours off` skips the freshness check. The exit code is 1 when any check fails.
+With no `--backend`, the drill uses sqlite unless both Cloudflare variables are set, and its first output line says which ran and why (`backend: sqlite (no Cloudflare credentials are set)`). `--backend d1` without the variables is an error. The sqlite backend uses `node:sqlite`, built into Node (unflagged since 22.13; this package already requires Node 24.14.1), so it adds no dependency. Its scratch file lives in its own temporary directory, named `restore-drill-<date>-<pid>`, and the `scratch` check fails if the directory is still there after the delete. A batch is one transaction, as D1's is, and a BLOB comes back as a BLOB.
+
+The d1 backend's token needs to create and delete D1 databases, and that permission covers every database in the account, so keep it out of scheduled CI. It is read from the environment, sent only as the Authorization header, and never printed. `--prefix backups/json/<run id>/` pins a run (the newest complete one is used otherwise) and `--max-age-hours off` skips the freshness check. The exit code is 1 when any check fails.
 
 Seven checks run, and each reports what it read, so "ok" cannot mean "read nothing":
 
@@ -111,17 +114,19 @@ Seven checks run, and each reports what it read, so "ok" cannot mean "read nothi
 
 **Largest table it can restore.** `restoreDump` holds one table file as a string and as parsed rows at the same time. Measured in Node 24 (V8, as a Worker runs it) on a 20 MB file: the parsed rows took 1.18 times the file's size for many small rows and 1.0 times for a few large strings, so the string and the rows together are about 2.2 times the file. The R2 body that `text()` decodes can be live beside them, which makes 3 times the file the safe figure. A Worker isolate has 128 MB for everything, so budget about 40 MB for one table file inside a Worker, and never more than about 58 MB (128 / 2.2) before the runtime's own use. That is the table's JSON file, not the database: tables are restored one at a time, so the largest table sets the limit. From Node (the CLI) the limit is the heap, 4.5 GB by default on Node 24 (`v8.getHeapStatistics().heap_size_limit`), and the longest string V8 will build, 536,870,888 characters, so a table file over about 512 MB cannot be read at all. Neither figure has been run against a real dump of that size.
 
-**Over REST.** A BLOB cannot be bound through the REST API, so a table holding one fails the `restore` check with a message saying so. Run the drill from a Worker with a binding for such a database.
+**What the sqlite backend cannot prove.** The checks are the same on both backends, and the 100,000 byte statement guard runs on both, but on sqlite it enforces the documented number against SQLite, not against D1. So sqlite does not show that D1 accepts every statement and value the restore sends: D1's remote bound-value cap (measured only against Miniflare's D1, above), its request and batch size limits, the REST API's own limits, or any difference between D1's SQLite build and Node's (FTS5 version, compile options). It is enough for a weekly check because the weekly question is whether this dump rebuilds into the right rows, a consistent FTS5 index and a working search, and none of that depends on D1's platform limits. Every row in a dump was accepted by D1 when it was written, and the restore sends values bound, never as literals. The d1 backend answers the platform question, and is run by hand, quarterly and after any change to the restore.
 
-**Seat steps.** The first run against the real account needs a token and creates a database, so the seat runs it. Download the newest complete run, then drill it:
+**Over REST.** The d1 backend cannot bind a BLOB through the REST API, so a table holding one fails the `restore` check with a message saying so. The sqlite backend restores BLOBs. To drill such a database against D1 itself, run the drill from a Worker with a binding.
+
+**Running the d1 backend by hand.** It needs a token and creates a database, so it is run from the seat's machine, not scheduled. Download the newest complete run, then drill it:
 
 ```sh
 npx wrangler r2 object get <bucket>/backups/json/<run id>/_complete.json --file dump/backups/json/<run id>/_complete.json   # once per object in the run
-CLOUDFLARE_ACCOUNT_ID=<account id> CLOUDFLARE_API_TOKEN=<token> npx d1-dump drill --dir dump
+CLOUDFLARE_ACCOUNT_ID=<account id> CLOUDFLARE_API_TOKEN=<token> npx d1-dump drill --dir dump --backend d1
 ```
 
-A drill that dies before its `finally` leaves a database named `restore-drill-<date>-<pid>`. List them with `npx wrangler d1 list` and delete with `npx wrangler d1 delete <name>`.
+A d1 drill that dies before its `finally` leaves a database named `restore-drill-<date>-<pid>`. List them with `npx wrangler d1 list` and delete with `npx wrangler d1 delete <name>`.
 
 ## Tests
 
-`npm test` runs every check against real D1 and R2 in Miniflare, including a dump restored into a scratch database and compared row for row, and the restore drill (`test/drill.test.ts`).
+`npm test` runs every check against real D1 and R2 in Miniflare, including a dump restored into a scratch database and compared row for row, and the restore drill on both backends (`test/drill.test.ts`, `test/sqlite.test.ts`).
