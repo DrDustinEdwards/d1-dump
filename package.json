@@ -8,6 +8,9 @@
   "engines": {
     "node": ">=24.14.1"
   },
+  "bin": {
+    "d1-dump": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

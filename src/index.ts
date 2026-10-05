@@ -26,3 +26,15 @@ export {
 } from "./runs.js";
 export { readPlan, type FtsMode, type FtsTable, type Plan, type SchemaEntry } from "./schema.js";
 export type { D1Like, D1Statement, R2Like } from "./types.js";
+export {
+  D1_MAX_STATEMENT_BYTES,
+  SCRATCH_PREFIX,
+  guardStatements,
+  runRestoreDrill,
+  scratchName,
+  type DrillCheck,
+  type DrillOptions,
+  type DrillResult,
+  type Scratch,
+  type StatementStats,
+} from "./drill.js";
