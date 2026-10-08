@@ -74,25 +74,89 @@ export interface PruneResult {
   pruned: number;
 }
 
-// Retention by age with a floor, never by count: a run older than retentionDays is
-// deleted whole, except that the minKept newest COMPLETE runs are kept whatever their
-// age. An incomplete run holds no slot in the floor and ages out like any other.
-// Refuses to delete anything while no complete run exists, since that is what an
-// emptied or misbound bucket looks like.
+// Graduated retention, the default (capsid/rulings/shared-homes-2026-10-06.md): the
+// newest complete run of each of the last `daily` UTC days, of each of the last
+// `weekly` ISO weeks (Monday to Sunday) and of each of the last `monthly` calendar
+// months, counting the current one in each case. The three sets overlap, so the default
+// 14 + 8 + 6 keeps about 25 runs from a daily history and reaches back six months.
+export interface RetentionPolicy {
+  daily: number;
+  weekly: number;
+  monthly: number;
+}
+export const DEFAULT_RETENTION: RetentionPolicy = { daily: 14, weekly: 8, monthly: 6 };
+
+const DAY_MS = 86_400_000;
+const dayOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+// The Monday of the ISO week a UTC day falls in, as a day string. Keyed this way the
+// year boundary needs no week-number arithmetic.
+function mondayOf(day: string): string {
+  const ms = Date.parse(`${day}T00:00:00.000Z`);
+  return dayOf(ms - ((new Date(ms).getUTCDay() + 6) % 7) * DAY_MS);
+}
+
+function wantedKeys(now: Date, policy: RetentionPolicy): { days: Set<string>; weeks: Set<string>; months: Set<string> } {
+  const today = Date.parse(`${dayOf(now.getTime())}T00:00:00.000Z`);
+  const days = new Set<string>();
+  for (let k = 0; k < policy.daily; k++) days.add(dayOf(today - k * DAY_MS));
+  const thisMonday = Date.parse(`${mondayOf(dayOf(today))}T00:00:00.000Z`);
+  const weeks = new Set<string>();
+  for (let k = 0; k < policy.weekly; k++) weeks.add(dayOf(thisMonday - k * 7 * DAY_MS));
+  const months = new Set<string>();
+  const here = new Date(today);
+  for (let k = 0; k < policy.monthly; k++) {
+    months.add(new Date(Date.UTC(here.getUTCFullYear(), here.getUTCMonth() - k, 1)).toISOString().slice(0, 7));
+  }
+  return { days, weeks, months };
+}
+
+// Prunes dumps. With no retentionDays or minKept it applies the graduated policy
+// (options.policy, DEFAULT_RETENTION). Passing retentionDays or minKept asks for the
+// older flat rule instead: a run older than retentionDays is deleted whole, except that
+// the minKept newest COMPLETE runs are kept whatever their age.
+//
+// Either way: the newest complete run is never pruned; an incomplete run holds no slot
+// and is kept only while it is inside the daily window (flat: inside retentionDays), so
+// it stays as evidence for a while and then ages out; and nothing is deleted while no
+// complete run exists, since that is what an emptied or misbound bucket looks like.
 export async function pruneDumps(
   bucket: R2Like,
-  options: { prefix?: string; now?: Date; retentionDays?: number; minKept?: number } = {}
+  options: { prefix?: string; now?: Date; policy?: RetentionPolicy; retentionDays?: number; minKept?: number } = {}
 ): Promise<PruneResult> {
   const prefix = options.prefix ?? DEFAULT_PREFIX;
   const now = options.now ?? new Date();
-  const retentionDays = options.retentionDays ?? DEFAULT_RETENTION_DAYS;
-  const minKept = options.minKept ?? DEFAULT_MIN_KEPT;
   const runs = await runsOf(bucket, prefix);
   const complete = runs.filter((r) => r.complete);
   if (complete.length === 0) return { kept: runs.length, pruned: 0 };
-  const floor = new Set(complete.slice(0, minKept).map((r) => r.id));
-  const cutoffDay = new Date(now.getTime() - retentionDays * 86_400_000).toISOString().slice(0, 10);
-  const stale = runs.filter((r) => !floor.has(r.id) && r.id.slice(0, 10) < cutoffDay);
+
+  let stale: typeof runs;
+  if (options.retentionDays !== undefined || options.minKept !== undefined) {
+    const retentionDays = options.retentionDays ?? DEFAULT_RETENTION_DAYS;
+    const minKept = options.minKept ?? DEFAULT_MIN_KEPT;
+    const floor = new Set(complete.slice(0, minKept).map((r) => r.id));
+    const cutoffDay = new Date(now.getTime() - retentionDays * DAY_MS).toISOString().slice(0, 10);
+    stale = runs.filter((r) => !floor.has(r.id) && r.id.slice(0, 10) < cutoffDay);
+  } else {
+    const policy = options.policy ?? DEFAULT_RETENTION;
+    const { days, weeks, months } = wantedKeys(now, policy);
+    const keep = new Set<string>([complete[0].id]);
+    // `complete` is newest first, so the first run seen for a key is the newest of it.
+    const seenDay = new Set<string>();
+    const seenWeek = new Set<string>();
+    const seenMonth = new Set<string>();
+    for (const r of complete) {
+      const day = r.id.slice(0, 10);
+      const week = mondayOf(day);
+      const month = day.slice(0, 7);
+      if (days.has(day) && !seenDay.has(day)) keep.add(r.id);
+      if (weeks.has(week) && !seenWeek.has(week)) keep.add(r.id);
+      if (months.has(month) && !seenMonth.has(month)) keep.add(r.id);
+      seenDay.add(day);
+      seenWeek.add(week);
+      seenMonth.add(month);
+    }
+    stale = runs.filter((r) => !keep.has(r.id) && !(!r.complete && days.has(r.id.slice(0, 10))));
+  }
   await deleteInChunks(bucket, stale.flatMap((r) => r.keys));
   return { kept: runs.length - stale.length, pruned: stale.length };
 }
