@@ -22,7 +22,7 @@ import { dumpDatabase, pruneDumps } from "@dustinedwards/d1-dump";
 export default {
   async scheduled(_event, env) {
     await dumpDatabase(env.DB, env.BACKUPS); // the site's own D1 and R2 bindings
-    await pruneDumps(env.BACKUPS);           // 90 days, the 14 newest complete runs always kept
+    await pruneDumps(env.BACKUPS);           // 14 daily, 8 weekly, 6 monthly; the newest complete run always kept
   },
 };
 ```
@@ -68,7 +68,7 @@ const dump = await dumpDatabase(env.DB, env.BACKUPS, { markComplete: false });
 if (await looksHealthy(env.DB)) await writeCompleteMarker(env.BACKUPS, dump);
 ```
 
-A run left without its marker keeps its objects as evidence of what the database held that day. It is never the newest dump `latestDump` returns, and it holds no slot in the retention floor.
+A run left without its marker keeps its objects as evidence of what the database held that day. It is never the newest dump `latestDump` returns, and it holds no slot in the retention policy. It is deleted once it falls outside the daily window.
 
 ## Restore drill
 
@@ -130,3 +130,15 @@ A d1 drill that dies before its `finally` leaves a database named `restore-drill
 ## Tests
 
 `npm test` runs every check against real D1 and R2 in Miniflare, including a dump restored into a scratch database and compared row for row, and the restore drill on both backends (`test/drill.test.ts`, `test/sqlite.test.ts`).
+
+## Retention
+
+`pruneDumps` keeps the newest complete run of each of the last 14 UTC days, each of the last 8 ISO weeks (Monday to Sunday) and each of the last 6 calendar months, counting the current day, week and month. The three sets overlap, so a daily history leaves about 25 runs and reaches back six months. The newest complete run is never deleted, and nothing is deleted while the bucket holds no complete run, which is what a wrong or emptied bucket looks like.
+
+Pass another policy per caller:
+
+```ts
+await pruneDumps(env.BACKUPS, { policy: { daily: 7, weekly: 4, monthly: 12 } });
+```
+
+Passing `retentionDays` or `minKept` asks for the older flat rule instead: a run older than `retentionDays` (default 90) is deleted, except that the `minKept` (default 14) newest complete runs are kept whatever their age.

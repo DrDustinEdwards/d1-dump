@@ -15,6 +15,7 @@ export {
 export { restoreDump, type RestoreOptions, type RestoreResult } from "./restore.js";
 export {
   DEFAULT_MIN_KEPT,
+  DEFAULT_RETENTION,
   DEFAULT_RETENTION_DAYS,
   DEFAULT_STALE_HOURS,
   backupHealth,
@@ -23,6 +24,7 @@ export {
   type BackupHealth,
   type LatestDump,
   type PruneResult,
+  type RetentionPolicy,
 } from "./runs.js";
 export { readPlan, type FtsMode, type FtsTable, type Plan, type SchemaEntry } from "./schema.js";
 export type { D1Like, D1Statement, R2Like } from "./types.js";
