@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { COMPLETE_MARKER, backupHealth, latestDump, pruneDumps, runIdFor, type R2Like } from "../src/index.js";
+import { COMPLETE_MARKER, backupHealth, latestDump, pruneDumps, runIdFor, selectStaleRuns, type R2Like } from "../src/index.js";
 import { sandbox } from "./helpers.js";
 
 let bucket: R2Like;
@@ -145,4 +145,18 @@ test("graduated prune takes its windows from a policy the caller passes", async 
   await daily("2026-09-01", "2026-09-27");
   await pruneDumps(bucket, { now: new Date("2026-09-27T12:00:00.000Z"), policy: { daily: 3, weekly: 0, monthly: 0 } });
   expect(days(await runIds())).toEqual(["2026-09-25", "2026-09-26", "2026-09-27"]);
+});
+test("selectStaleRuns is the rule pruneDumps applies, over run ids alone and in any input order", () => {
+  const now = new Date("2026-09-27T12:00:00.000Z");
+  const id = (day: string) => `${day}T09-00-00-000Z`;
+  const runs = [
+    { id: id("2026-09-26"), complete: true }, // inside the daily window
+    { id: id("2026-03-01"), complete: true }, // outside every window
+    { id: id("2026-09-20"), complete: false }, // incomplete, inside the daily window: kept as evidence
+    { id: id("2026-08-01"), complete: false }, // incomplete and old: ages out
+    { id: id("2026-09-27"), complete: true }, // newest complete, never selected
+  ];
+  expect(selectStaleRuns(runs, { now })).toEqual([id("2026-08-01"), id("2026-03-01")]);
+  expect(selectStaleRuns([...runs].reverse(), { now })).toEqual([id("2026-08-01"), id("2026-03-01")]);
+  expect(selectStaleRuns(runs.filter((r) => !r.complete), { now }), "no complete run, nothing selected").toEqual([]);
 });

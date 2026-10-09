@@ -142,3 +142,5 @@ await pruneDumps(env.BACKUPS, { policy: { daily: 7, weekly: 4, monthly: 12 } });
 ```
 
 Passing `retentionDays` or `minKept` asks for the older flat rule instead: a run older than `retentionDays` (default 90) is deleted, except that the `minKept` (default 14) newest complete runs are kept whatever their age.
+
+`selectStaleRuns(runs, options)` is the same rule without a bucket: give it `{ id, complete }` for each run (run ids as `runIdFor` makes them) and it returns the ids retention would delete, newest first. `pruneDumps` is `selectStaleRuns` over the runs under a prefix, then a delete. A caller that holds its runs another way, such as a directory of run folders, uses it to apply the same rule instead of copying it.
