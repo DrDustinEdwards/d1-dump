@@ -9,7 +9,7 @@ It is Capsid's nightly dump (`src/backup.ts` in DrDustinEdwards/capsid), made in
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.4.0
+npm install github:DrDustinEdwards/d1-dump#v0.4.1
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
