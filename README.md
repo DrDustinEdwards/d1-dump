@@ -9,7 +9,7 @@ It is Capsid's nightly dump (`src/backup.ts` in DrDustinEdwards/capsid), made in
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.4.0
+npm install github:DrDustinEdwards/d1-dump#v0.4.1
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -142,3 +142,5 @@ await pruneDumps(env.BACKUPS, { policy: { daily: 7, weekly: 4, monthly: 12 } });
 ```
 
 Passing `retentionDays` or `minKept` asks for the older flat rule instead: a run older than `retentionDays` (default 90) is deleted, except that the `minKept` (default 14) newest complete runs are kept whatever their age.
+
+`selectStaleRuns(runs, options)` is the same rule without a bucket: give it `{ id, complete }` for each run (run ids as `runIdFor` makes them) and it returns the ids retention would delete, newest first. `pruneDumps` is `selectStaleRuns` over the runs under a prefix, then a delete. A caller that holds its runs another way, such as a directory of run folders, uses it to apply the same rule instead of copying it.

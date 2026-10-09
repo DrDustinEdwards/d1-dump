@@ -110,32 +110,43 @@ function wantedKeys(now: Date, policy: RetentionPolicy): { days: Set<string>; we
   return { days, weeks, months };
 }
 
-// Prunes dumps. With no retentionDays or minKept it applies the graduated policy
-// (options.policy, DEFAULT_RETENTION). Passing retentionDays or minKept asks for the
-// older flat rule instead: a run older than retentionDays is deleted whole, except that
-// the minKept newest COMPLETE runs are kept whatever their age.
+export interface RunRef {
+  id: string;
+  complete: boolean;
+}
+
+export interface SelectOptions {
+  now?: Date;
+  policy?: RetentionPolicy;
+  retentionDays?: number;
+  minKept?: number;
+}
+
+// Which runs retention deletes, from a list of run ids and the time. Pure: no bucket, no
+// disk, so a caller that holds its runs some other way (a directory of run folders) uses
+// the same rule pruneDumps does. With no retentionDays or minKept it applies the
+// graduated policy (options.policy, DEFAULT_RETENTION). Passing retentionDays or minKept
+// asks for the older flat rule instead: a run older than retentionDays is deleted whole,
+// except that the minKept newest COMPLETE runs are kept whatever their age.
 //
 // Either way: the newest complete run is never pruned; an incomplete run holds no slot
 // and is kept only while it is inside the daily window (flat: inside retentionDays), so
-// it stays as evidence for a while and then ages out; and nothing is deleted while no
+// it stays as evidence for a while and then ages out; and nothing is selected while no
 // complete run exists, since that is what an emptied or misbound bucket looks like.
-export async function pruneDumps(
-  bucket: R2Like,
-  options: { prefix?: string; now?: Date; policy?: RetentionPolicy; retentionDays?: number; minKept?: number } = {}
-): Promise<PruneResult> {
-  const prefix = options.prefix ?? DEFAULT_PREFIX;
+// Returns the ids to delete, newest first; the input order does not matter.
+export function selectStaleRuns(runs: RunRef[], options: SelectOptions = {}): string[] {
   const now = options.now ?? new Date();
-  const runs = await runsOf(bucket, prefix);
-  const complete = runs.filter((r) => r.complete);
-  if (complete.length === 0) return { kept: runs.length, pruned: 0 };
+  const sorted = [...runs].sort((x, y) => (x.id < y.id ? 1 : x.id > y.id ? -1 : 0));
+  const complete = sorted.filter((r) => r.complete);
+  if (complete.length === 0) return [];
 
-  let stale: typeof runs;
+  let stale: RunRef[];
   if (options.retentionDays !== undefined || options.minKept !== undefined) {
     const retentionDays = options.retentionDays ?? DEFAULT_RETENTION_DAYS;
     const minKept = options.minKept ?? DEFAULT_MIN_KEPT;
     const floor = new Set(complete.slice(0, minKept).map((r) => r.id));
     const cutoffDay = new Date(now.getTime() - retentionDays * DAY_MS).toISOString().slice(0, 10);
-    stale = runs.filter((r) => !floor.has(r.id) && r.id.slice(0, 10) < cutoffDay);
+    stale = sorted.filter((r) => !floor.has(r.id) && r.id.slice(0, 10) < cutoffDay);
   } else {
     const policy = options.policy ?? DEFAULT_RETENTION;
     const { days, weeks, months } = wantedKeys(now, policy);
@@ -155,8 +166,21 @@ export async function pruneDumps(
       seenWeek.add(week);
       seenMonth.add(month);
     }
-    stale = runs.filter((r) => !keep.has(r.id) && !(!r.complete && days.has(r.id.slice(0, 10))));
+    stale = sorted.filter((r) => !keep.has(r.id) && !(!r.complete && days.has(r.id.slice(0, 10))));
   }
+  return stale.map((r) => r.id);
+}
+
+// Prunes dumps in a bucket: selectStaleRuns over the runs under the prefix, each stale run
+// deleted whole.
+export async function pruneDumps(
+  bucket: R2Like,
+  options: { prefix?: string; now?: Date; policy?: RetentionPolicy; retentionDays?: number; minKept?: number } = {}
+): Promise<PruneResult> {
+  const prefix = options.prefix ?? DEFAULT_PREFIX;
+  const runs = await runsOf(bucket, prefix);
+  const gone = new Set(selectStaleRuns(runs, options));
+  const stale = runs.filter((r) => gone.has(r.id));
   await deleteInChunks(bucket, stale.flatMap((r) => r.keys));
   return { kept: runs.length - stale.length, pruned: stale.length };
 }
