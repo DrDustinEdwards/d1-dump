@@ -4,3 +4,5 @@ dist/
 .env
 .env.*
 .dev.vars
+reports/
+.stryker-tmp/
