@@ -2,9 +2,9 @@ name: bump-consumers
 
 # A release of this package reaches every repository that depends on it at once (Dustin, 2026-10-09;
 # job_3b09752450c1). Pushing a v* tag starts a Renovate run in each consumer, and the shared preset
-# (DrDustinEdwards/renovate-config default.json) opens the bump with no cooldown and no schedule,
+# (DrDustinEdwards/devkit default.json) opens the bump with no cooldown and no schedule,
 # automerging minor and patch on green CI. The logic, and how consumers are found from their
-# manifests, is in renovate-config's bump-consumers.yml; this file only calls it.
+# manifests, is in devkit's bump-consumers.yml; this file only calls it.
 #
 # Run it by hand (Actions > bump-consumers > Run workflow) to list the consumers without changing
 # anything (dry_run, the default), or to start the runs again after a late npm publish.
@@ -25,7 +25,7 @@ permissions: {}
 
 jobs:
   bump:
-    uses: DrDustinEdwards/renovate-config/.github/workflows/bump-consumers.yml@5fc5e5995612a3e48120f2122f9e7dfee7960365
+    uses: DrDustinEdwards/devkit/.github/workflows/bump-consumers.yml@5fc5e5995612a3e48120f2122f9e7dfee7960365
     with:
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     secrets:
