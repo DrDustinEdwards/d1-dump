@@ -69,9 +69,24 @@ export async function backupHealth(
   return result;
 }
 
+// kept: runs retention keeps. pruned: stale runs deleted. locked: stale runs a bucket lock
+// rule refused to delete, left in place for a later prune; kept + pruned + locked is
+// every run under the prefix.
 export interface PruneResult {
   kept: number;
   pruned: number;
+  locked: number;
+}
+
+// R2 refuses a delete of an object a bucket lock rule still holds with error 10069,
+// ObjectLockedByBucketPolicy (developers.cloudflare.com/r2/api/error-codes/). The Workers
+// binding throws an R2Error carrying it as `code` and at the end of its message.
+const R2_OBJECT_LOCKED = 10069;
+function isLockRefusal(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  if ((err as { code?: unknown }).code === R2_OBJECT_LOCKED) return true;
+  const message = (err as { message?: unknown }).message;
+  return typeof message === "string" && /\(10069\)|ObjectLockedByBucketPolicy/.test(message);
 }
 
 // Graduated retention, the default (capsid/rulings/shared-homes-2026-10-06.md): the
@@ -172,7 +187,11 @@ export function selectStaleRuns(runs: RunRef[], options: SelectOptions = {}): st
 }
 
 // Prunes dumps in a bucket: selectStaleRuns over the runs under the prefix, each stale run
-// deleted whole.
+// deleted whole. A run is deleted marker first, in its own call, then the rest, so a run
+// that is only partly deleted is never left looking complete. A run whose delete a bucket
+// lock refuses is skipped and counted in `locked`, and the prune goes on to the next run;
+// it is selected again by a later prune and goes once the lock has aged off it. Any other
+// delete failure throws.
 export async function pruneDumps(
   bucket: R2Like,
   options: { prefix?: string; now?: Date; policy?: RetentionPolicy; retentionDays?: number; minKept?: number } = {}
@@ -181,6 +200,16 @@ export async function pruneDumps(
   const runs = await runsOf(bucket, prefix);
   const gone = new Set(selectStaleRuns(runs, options));
   const stale = runs.filter((r) => gone.has(r.id));
-  await deleteInChunks(bucket, stale.flatMap((r) => r.keys));
-  return { kept: runs.length - stale.length, pruned: stale.length };
+  let locked = 0;
+  for (const r of stale) {
+    const marker = `${prefix}${r.id}/${COMPLETE_MARKER}`;
+    try {
+      if (r.complete) await bucket.delete(marker);
+      await deleteInChunks(bucket, r.keys.filter((k) => k !== marker));
+    } catch (err) {
+      if (!isLockRefusal(err)) throw err;
+      locked++;
+    }
+  }
+  return { kept: runs.length - stale.length, pruned: stale.length - locked, locked };
 }

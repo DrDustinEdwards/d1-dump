@@ -50,7 +50,7 @@ test("flat prune (retentionDays or minKept given) keeps by age with a floor of t
   // 2026-09-27 less 90 days is 2026-06-29: every run is past retention, so only the
   // floor survives: the 14 newest complete runs, 06-07 to 06-20.
   const result = await pruneDumps(bucket, { now: new Date("2026-09-27T12:00:00.000Z"), retentionDays: 90, minKept: 14 });
-  expect(result).toEqual({ kept: 14, pruned: 8 });
+  expect(result).toEqual({ kept: 14, pruned: 8, locked: 0 });
   const left = await runIds();
   expect(left[0]).toBe("2026-06-07T09-00-00-000Z");
   expect(left.at(-1)).toBe("2026-06-20T09-00-00-000Z");
@@ -58,12 +58,12 @@ test("flat prune (retentionDays or minKept given) keeps by age with a floor of t
 
 test("flat prune keeps a run inside retention even past the floor", async () => {
   for (let d = 1; d <= 20; d++) await run(`2026-09-${String(d).padStart(2, "0")}T09:00:00.000Z`, true);
-  expect(await pruneDumps(bucket, { now: new Date("2026-09-27T12:00:00.000Z"), retentionDays: 90, minKept: 14 })).toEqual({ kept: 20, pruned: 0 });
+  expect(await pruneDumps(bucket, { now: new Date("2026-09-27T12:00:00.000Z"), retentionDays: 90, minKept: 14 })).toEqual({ kept: 20, pruned: 0, locked: 0 });
 });
 
 test("prune deletes nothing while no complete run exists, which is what a wrong bucket looks like", async () => {
   await run("2026-01-01T09:00:00.000Z", false);
-  expect(await pruneDumps(bucket, { now: new Date("2026-09-27T12:00:00.000Z") })).toEqual({ kept: 1, pruned: 0 });
+  expect(await pruneDumps(bucket, { now: new Date("2026-09-27T12:00:00.000Z") })).toEqual({ kept: 1, pruned: 0, locked: 0 });
   expect(await runIds()).toEqual(["2026-01-01T09-00-00-000Z"]);
 });
 
@@ -138,7 +138,7 @@ test("graduated prune never removes the newest complete run, even when it is old
   // The only complete run is nine months old and is kept; the old incomplete run is not
   // in any window and goes; the incomplete run from yesterday is inside the daily window.
   expect(days(await runIds())).toEqual(["2026-01-05", "2026-09-26"]);
-  expect(result).toEqual({ kept: 2, pruned: 1 });
+  expect(result).toEqual({ kept: 2, pruned: 1, locked: 0 });
 });
 
 test("graduated prune takes its windows from a policy the caller passes", async () => {
@@ -159,4 +159,71 @@ test("selectStaleRuns is the rule pruneDumps applies, over run ids alone and in 
   expect(selectStaleRuns(runs, { now })).toEqual([id("2026-08-01"), id("2026-03-01")]);
   expect(selectStaleRuns([...runs].reverse(), { now })).toEqual([id("2026-08-01"), id("2026-03-01")]);
   expect(selectStaleRuns(runs.filter((r) => !r.complete), { now }), "no complete run, nothing selected").toEqual([]);
+});
+
+// A bucket whose delete refuses, as R2 does under a bucket lock rule (R2 error 10069,
+// ObjectLockedByBucketPolicy), every key `locked` matches. The refusal is per call, as
+// the binding's bulk delete is: one locked key fails the call.
+function lockedBucket(inner: R2Like, locked: (key: string) => boolean, err?: Error): R2Like & { calls: string[][] } {
+  const calls: string[][] = [];
+  return {
+    calls,
+    put: (key, value, options) => inner.put(key, value, options),
+    get: (key) => inner.get(key),
+    list: (options) => inner.list(options),
+    createMultipartUpload: (key, options) => inner.createMultipartUpload(key, options),
+    async delete(keys) {
+      const list = Array.isArray(keys) ? keys : [keys];
+      calls.push(list);
+      if (list.some(locked)) {
+        throw err ?? Object.assign(new Error("delete: Object is protected by a bucket lock rule and cannot be modified or deleted. (10069)"), { code: 10069 });
+      }
+      await inner.delete(keys);
+    },
+  };
+}
+
+test("prune skips a run whose delete a bucket lock refuses, counts it, and goes on to the other stale runs", async () => {
+  const now = new Date("2026-09-27T12:00:00.000Z");
+  const dup = await run("2026-09-27T02:00:00.000Z", true); // same-day duplicate: stale, and young
+  await run("2026-09-27T09:00:00.000Z", true);
+  const oldComplete = await run("2026-01-05T09:00:00.000Z", true); // outside every window
+  const oldIncomplete = await run("2026-01-04T09:00:00.000Z", false);
+  // A 13 day lock on the prefix: every object of a run from 09-14 on is refused.
+  const locked = lockedBucket(bucket, (key) => key.slice(P.length, P.length + 10) >= "2026-09-14");
+  const result = await pruneDumps(locked, { now });
+  expect(result).toEqual({ kept: 1, pruned: 2, locked: 1 });
+  const left = await runIds();
+  expect(left).toContain(dup);
+  expect(left).not.toContain(oldComplete);
+  expect(left).not.toContain(oldIncomplete);
+  // The refused run is whole: its marker was refused first, so nothing of it went.
+  const keys = (await bucket.list({ prefix: P })).objects.map((o) => o.key);
+  expect(keys).toContain(`${P}${dup}/${COMPLETE_MARKER}`);
+  expect(keys).toContain(`${P}${dup}/posts.json`);
+  // Next day, past the lock, the same run goes.
+  expect(await pruneDumps(bucket, { now: new Date("2026-10-11T12:00:00.000Z") })).toMatchObject({ locked: 0 });
+  expect(await runIds()).not.toContain(dup);
+});
+
+test("prune deletes a run's marker before its tables, so a run the lock half refuses is no longer complete", async () => {
+  const now = new Date("2026-09-27T12:00:00.000Z");
+  await run("2026-09-27T09:00:00.000Z", true);
+  const old = await run("2026-01-05T09:00:00.000Z", true);
+  // The marker is old enough to delete and the table is not (a run that straddled the
+  // lock's age): the marker goes, the run is counted locked, and it is left incomplete.
+  const locked = lockedBucket(bucket, (key) => key === `${P}${old}/posts.json`);
+  expect(await pruneDumps(locked, { now })).toEqual({ kept: 1, pruned: 0, locked: 1 });
+  expect(locked.calls[0]).toEqual([`${P}${old}/${COMPLETE_MARKER}`]);
+  const keys = (await bucket.list({ prefix: P })).objects.map((o) => o.key);
+  expect(keys).not.toContain(`${P}${old}/${COMPLETE_MARKER}`);
+  expect(keys).toContain(`${P}${old}/posts.json`);
+  expect((await latestDump(bucket))?.run_id).toBe("2026-09-27T09-00-00-000Z");
+});
+
+test("prune still throws on a delete failure that is not a lock refusal", async () => {
+  await run("2026-09-27T09:00:00.000Z", true);
+  await run("2026-01-05T09:00:00.000Z", true);
+  const broken = lockedBucket(bucket, () => true, new Error("delete: Internal Error (10001)"));
+  await expect(pruneDumps(broken, { now: new Date("2026-09-27T12:00:00.000Z") })).rejects.toThrow("Internal Error (10001)");
 });
