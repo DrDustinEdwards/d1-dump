@@ -27,8 +27,8 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@types/node": "24.13.3",
-    "miniflare": "4.20260701.0",
+    "@types/node": "24.19.1",
+    "miniflare": "4.20260730.0",
     "typescript": "5.9.3",
     "vitest": "4.1.11",
     "wrangler": "4.147.0"
