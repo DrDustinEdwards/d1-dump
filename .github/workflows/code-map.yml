@@ -1,0 +1,21 @@
+name: code-map
+
+# After each push to main, devkit's shared code-map workflow measures this repository's modules and functions and
+# publishes code-map.json to the code-map branch, where the Capsid system explorer reads it. Never a gate on a pull request.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  code-map:
+    # A called workflow holds no more than this job grants: the write lets it push code-map.json to the code-map branch.
+    permissions:
+      contents: write
+    uses: DrDustinEdwards/devkit/.github/workflows/code-map.yml@6db8dd488dc4c5a320617da41af6be748b0866cd
+    with:
+      coverage-command: npx vitest run --coverage.enabled --coverage.provider=v8 --coverage.reporter=json --coverage.include=src/**
