@@ -2,11 +2,20 @@ name: code-map
 
 # After each push to main, devkit's shared code-map workflow measures this repository's modules and functions and
 # publishes code-map.json to the code-map branch, where the Capsid system explorer reads it. Never a gate on a pull request.
+# Once a week (and on a manual run) it also runs the Stryker chunks of stryker.config.mjs; a push reuses that run's
+# numbers and marks a function changed since as stale.
 
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: "17 4 * * 1"
   workflow_dispatch:
+
+# One run at a time, so a push's map never overwrites the weekly mutation run while it is still going.
+concurrency:
+  group: code-map
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -16,6 +25,9 @@ jobs:
     # A called workflow holds no more than this job grants: the write lets it push code-map.json to the code-map branch.
     permissions:
       contents: write
-    uses: DrDustinEdwards/devkit/.github/workflows/code-map.yml@6db8dd488dc4c5a320617da41af6be748b0866cd
+    uses: DrDustinEdwards/devkit/.github/workflows/code-map.yml@6dafcd3e02f461d5fbb9a8222fc38aaee0a4c1af
     with:
       coverage-command: npx vitest run --coverage.enabled --coverage.provider=v8 --coverage.reporter=json --coverage.include=src/**
+      mutation-command: ${{ github.event_name != 'push' && 'npm i --no-save @stryker-mutator/core@9.6.1 @stryker-mutator/vitest-runner@9.6.1 && for c in drill dump restore runs rest; do STRYKER_CHUNK=$c npx stryker run; done' || '' }}
+      mutation-file: reports/mutation/*.json
+      timeout-minutes: ${{ github.event_name != 'push' && 120 || 20 }}
