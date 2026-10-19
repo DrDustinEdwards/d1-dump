@@ -27,11 +27,11 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@types/node": "24.19.1",
-    "@vitest/coverage-v8": "4.1.11",
+    "@types/node": "24.19.2",
+    "@vitest/coverage-v8": "4.1.12",
     "miniflare": "4.20260730.0",
     "typescript": "5.9.3",
-    "vitest": "4.1.11",
+    "vitest": "4.1.12",
     "wrangler": "4.149.0"
   }
 }
