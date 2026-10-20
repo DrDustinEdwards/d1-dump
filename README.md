@@ -9,7 +9,7 @@ It is Capsid's nightly dump (`src/backup.ts` in DrDustinEdwards/capsid), made in
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.4.2
+npm install github:DrDustinEdwards/d1-dump#v0.5.0
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -60,6 +60,20 @@ await restoreDump(env.SCRATCH_DB, env.BACKUPS, latest.prefix); // into an EMPTY 
 **Size limit.** `restoreDump` reads one table's file whole and holds it with its parsed rows. Paging applies only to the dump. A Worker isolate has 128 MB for the JavaScript heap and WebAssembly together (developers.cloudflare.com/workers/platform/limits). So a table whose file approaches that size, which is what `paged` exists for, will not restore inside a Worker. Restore it from Node instead, against a local D1 through Miniflare as the tests do, or split the file. The restore holds one table at a time, so it is the largest table that sets the limit, not the whole database.
 
 ## Complete only after your own checks
+
+`runCheckedBackup` is the nightly job every site runs: dump without the marker, check, mark complete, prune.
+
+```ts
+import { runCheckedBackup } from "@dustinedwards/d1-dump";
+
+await runCheckedBackup(env.DB, env.BACKUPS, {
+  exclude: ["session"],            // credential tables, which a backup must never carry
+  required: ["posts", "journal"],  // what exists nowhere else
+  check: (dump) => [],             // the site's own checks, one message per failure
+});
+```
+
+The standard checks refuse an empty dump, an excluded table in the dump and a missing required one. A failed check throws `BackupIncomplete` (with `dump` and `problems`), leaves the run without its marker and prunes nothing, so the scheduled run fails and the health age keeps growing. `standardProblems` is the same checks on their own. For a different order, call the pieces yourself:
 
 ```ts
 import { dumpDatabase, writeCompleteMarker } from "@dustinedwards/d1-dump";
