@@ -39,7 +39,7 @@ export function directoryBucket(root: string): R2Like {
   };
 }
 
-export type Backend = "sqlite" | "d1";
+type Backend = "sqlite" | "d1";
 
 // sqlite unless Cloudflare credentials are set; either can be asked for. Says why, so the
 // drill's output shows which one ran. asking for d1 without credentials is an error.
