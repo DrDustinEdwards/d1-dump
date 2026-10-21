@@ -104,6 +104,9 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
   for (const name of [...exclude, ...Object.keys(paged)]) {
     if (!known.has(name)) throw new Error(`d1-dump: ${name} is named in the options but is not a dumpable table`);
   }
+  for (const [name, p] of Object.entries(paged)) {
+    if (!Number.isInteger(p.pageRows) || p.pageRows < 1) throw new Error(`d1-dump: ${name} pageRows must be a whole number of at least 1`);
+  }
   const targets = [...plan.tables, ...internalFts].filter((t) => !exclude.includes(t));
   for (const name of Object.keys(sidecarsOf(options))) {
     if (targets.includes(name.slice(1, -".json".length))) throw new Error(`d1-dump: sidecar ${name} would overwrite a table`);
@@ -112,7 +115,8 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
   const snapshot = await db.batch(
     targets.map((t) => {
       const p = paged[t];
-      if (p) return db.prepare(`SELECT MAX(${quoteIdent(p.idColumn)}) AS max_id FROM ${quoteIdent(t)}`);
+      // The row count at the same instant, so the pages read afterwards can be held to it.
+      if (p) return db.prepare(`SELECT MAX(${quoteIdent(p.idColumn)}) AS max_id, COUNT(*) AS n FROM ${quoteIdent(t)}`);
       // An internal FTS5 table is read with its rowid, which the restore needs to keep
       // any join on it.
       return db.prepare(internalFts.includes(t) ? `SELECT rowid AS "rowid", * FROM ${quoteIdent(t)}` : `SELECT * FROM ${quoteIdent(t)}`);
@@ -128,11 +132,15 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
     const p = paged[table];
     let rows: number;
     if (p) {
-      const maxId = Number((results[0] as { max_id: number | null } | undefined)?.max_id ?? Number.NaN);
+      const first = results[0] as { max_id: number | null; n: number } | undefined;
+      const maxId = Number(first?.max_id ?? Number.NaN);
       const head = `{"exported_at":${JSON.stringify(exportedAt)},"table":${JSON.stringify(table)},"rows":[`;
       rows = Number.isNaN(maxId)
         ? await putJsonStreamed(bucket, key, head, (async function* () {})())
         : await putJsonStreamed(bucket, key, head, pages(db, table, p.idColumn, maxId, p.pageRows));
+      // Fewer rows than the snapshot held means a repeated id was skipped or rows went away mid-dump: not a backup.
+      const expected = Number(first?.n ?? 0);
+      if (rows !== expected) throw new Error(`d1-dump: ${table} paged ${rows} rows but held ${expected} when the dump began`);
     } else {
       await bucket.put(key, JSON.stringify({ exported_at: exportedAt, table, rows: results }), JSON_TYPE);
       rows = results.length;
