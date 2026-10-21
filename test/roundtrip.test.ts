@@ -104,6 +104,14 @@ test("options that name no table are refused, so an exclude list cannot rot", as
   expect(dumped.tables.map((t) => t.name)).not.toContain("settings");
 });
 
+test("a paged table must stream every row the snapshot held, and a page size must be at least 1", async () => {
+  await exec(src, ["CREATE TABLE events (id INTEGER, body TEXT)", "INSERT INTO events VALUES (1, 'a'), (2, 'b'), (2, 'c'), (3, 'd')"]);
+  // id 2 repeats, so the page after (2, 'b') starts past it and (2, 'c') is never read.
+  await expect(dumpDatabase(src, bucket, { now: NOW, paged: { events: { idColumn: "id", pageRows: 2 } } })).rejects.toThrow(/events paged 3 rows but held 4/);
+  await expect(dumpDatabase(src, bucket, { now: NOW, paged: { events: { idColumn: "id", pageRows: 0 } } })).rejects.toThrow(/pageRows must be a whole number/);
+  expect(await bucket.list({ prefix: "" }).then((l) => l.objects.filter((o) => o.key.endsWith(COMPLETE_MARKER)))).toEqual([]);
+});
+
 test("sidecars are written before the marker and listed in it", async () => {
   const dumped = await dumpDatabase(src, bucket, { now: NOW, sidecars: { kv: { keys: { mode: "off" } } } });
   const marker = JSON.parse(await (await bucket.get(`${dumped.prefix}${COMPLETE_MARKER}`))!.text());

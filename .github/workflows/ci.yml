@@ -23,3 +23,5 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # The published package has no runtime dependencies today; a high in any it gains fails the build.
+      - run: npm audit --omit=dev --audit-level=high
