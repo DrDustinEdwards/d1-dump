@@ -18,4 +18,4 @@ jobs:
   ai-author:
     uses: DrDustinEdwards/devkit/.github/workflows/ai-author.yml@9458af9d1521d77ed5bca0f7454c07eea3869221 # v0.11.0
     with:
-      devkit: DrDustinEdwards/devkit#v0.8.0
+      devkit: DrDustinEdwards/devkit#v0.11.0

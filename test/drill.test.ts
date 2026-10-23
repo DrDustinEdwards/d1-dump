@@ -4,8 +4,8 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { cloudflareScratch } from "../src/cloudflare.js";
 import { directoryBucket } from "../src/node.js";
-import { D1_MAX_STATEMENT_BYTES, dumpDatabase, guardStatements, runRestoreDrill, scratchName, type D1Like, type DrillResult, type R2Like } from "../src/index.js";
-import { SITE_ROWS, SITE_SCHEMA, exec, rows, sandbox } from "./helpers.js";
+import { D1_MAX_STATEMENT_BYTES, dumpDatabase, guardStatements, runRestoreDrill, scratchName, type D1Like, type R2Like } from "../src/index.js";
+import { SITE_ROWS, SITE_SCHEMA, checkOf, exec, rows, sandbox } from "./helpers.js";
 
 let src: D1Like;
 let dst: D1Like;
@@ -20,12 +20,6 @@ afterEach(async () => dispose());
 
 const NOW = new Date("2026-09-27T09:00:00.000Z");
 const LATER = new Date("2026-09-27T10:00:00.000Z");
-
-function checkOf(result: DrillResult, name: string) {
-  const c = result.checks.find((x) => x.name === name);
-  if (!c) throw new Error(`no ${name} check ran: ${result.checks.map((x) => x.name).join(", ")}`);
-  return c;
-}
 
 // A scratch database that records whether the drill deleted it.
 function scratchOf(db: D1Like) {

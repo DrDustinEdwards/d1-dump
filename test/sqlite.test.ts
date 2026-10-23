@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { D1_MAX_STATEMENT_BYTES, dumpDatabase, restoreDump, runRestoreDrill, writeCompleteMarker, type D1Like, type DrillResult, type R2Like } from "../src/index.js";
+import { D1_MAX_STATEMENT_BYTES, dumpDatabase, restoreDump, runRestoreDrill, writeCompleteMarker, type D1Like, type R2Like } from "../src/index.js";
 import { pickBackend, sqliteScratch } from "../src/node.js";
-import { SITE_ROWS, SITE_SCHEMA, exec, rows, sandbox } from "./helpers.js";
+import { SITE_ROWS, SITE_SCHEMA, checkOf, exec, rows, sandbox } from "./helpers.js";
 
 // The same drill against the tokenless backend: a local SQLite file (node:sqlite).
 
@@ -19,12 +19,6 @@ afterEach(async () => dispose());
 
 const NOW = new Date("2026-09-27T09:00:00.000Z");
 const LATER = new Date("2026-09-27T10:00:00.000Z");
-
-function checkOf(result: DrillResult, name: string) {
-  const c = result.checks.find((x) => x.name === name);
-  if (!c) throw new Error(`no ${name} check ran: ${result.checks.map((x) => x.name).join(", ")}`);
-  return c;
-}
 
 // A sqlite scratch backend that can rewrite statements, and reads a query from the copy
 // just before the drill deletes it.
