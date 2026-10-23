@@ -9,7 +9,7 @@ Each site installs it. D1 Time Travel already restores any minute of the last 30
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.5.0
+npm install github:DrDustinEdwards/d1-dump#v0.5.1
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
