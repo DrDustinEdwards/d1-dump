@@ -59,3 +59,23 @@ test("a failing night prunes nothing, so older complete runs survive it", async 
   expect(await hasMarker(old.dump.run_id)).toBe(true);
   expect((await latestDump(bucket))?.run_id).toBe(old.dump.run_id);
 });
+
+test("a counted table must match its live count, and all counted tables empty is refused", async () => {
+  // A row written between the dump and the count, as a lost row would look.
+  let counting = false;
+  const racing: D1Like = {
+    prepare: (sql) => ((counting ||= sql.startsWith("SELECT COUNT(*) AS n FROM")), src.prepare(sql)),
+    batch: async (statements) => {
+      if (counting) await exec(src, ["INSERT INTO comments (id, post_id, text) VALUES (4, 2, 'late')"]);
+      return src.batch(statements);
+    },
+  };
+  const err = (await runCheckedBackup(racing, bucket, { now: NOW, counted: ["posts", "comments"] }).catch((e: unknown) => e)) as BackupIncomplete;
+  expect(err.problems).toEqual(["comments dumped 3 rows but has 4"]);
+  expect(await hasMarker(runIdFor(NOW))).toBe(false);
+
+  await exec(src, ["DELETE FROM comments", "DELETE FROM posts"]);
+  const empty = (await runCheckedBackup(src, bucket, { now: NOW, counted: ["posts", "comments"] }).catch((e: unknown) => e)) as BackupIncomplete;
+  expect(empty.problems).toEqual(["every counted table dumped empty"]);
+  expect((await runCheckedBackup(src, bucket, { now: NOW, counted: ["settings"] })).dump.run_id).toBe(runIdFor(NOW));
+});
