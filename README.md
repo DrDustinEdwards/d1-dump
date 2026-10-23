@@ -9,7 +9,7 @@ Each site installs it. D1 Time Travel already restores any minute of the last 30
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.5.1
+npm install github:DrDustinEdwards/d1-dump#v0.6.0
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -69,11 +69,12 @@ import { runCheckedBackup } from "@dustinedwards/d1-dump";
 await runCheckedBackup(env.DB, env.BACKUPS, {
   exclude: ["session"],            // credential tables, which a backup must never carry
   required: ["posts", "journal"],  // what exists nowhere else
+  counted: ["posts"],              // required too, and its dumped rows must equal a live count
   check: (dump) => [],             // the site's own checks, one message per failure
 });
 ```
 
-The standard checks refuse an empty dump, an excluded table in the dump and a missing required one. A failed check throws `BackupIncomplete` (with `dump` and `problems`), leaves the run without its marker and prunes nothing, so the scheduled run fails and the health age keeps growing. `standardProblems` is the same checks on their own. For a different order, call the pieces yourself:
+The standard checks refuse an empty dump, an excluded table in the dump and a missing required one. Each `counted` table is counted again straight after the dump and must match what was dumped, and the run is refused if every counted table dumped empty, since an emptied database matches its own counts. Count only tables the operator writes: a reader's write between the dump and the count fails the night. A failed check throws `BackupIncomplete` (with `dump` and `problems`), leaves the run without its marker and prunes nothing, so the scheduled run fails and the health age keeps growing. `standardProblems` is the same checks on their own. For a different order, call the pieces yourself:
 
 ```ts
 import { dumpDatabase, writeCompleteMarker } from "@dustinedwards/d1-dump";
