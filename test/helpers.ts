@@ -1,5 +1,5 @@
 import { Miniflare } from "miniflare";
-import type { D1Like, R2Like } from "../src/index.js";
+import type { D1Like, DrillResult, R2Like } from "../src/index.js";
 
 // Real D1 (SQLite with FTS5) and R2, in-process, as workerd runs them.
 export async function sandbox(): Promise<{ src: D1Like; dst: D1Like; bucket: R2Like; dispose: () => Promise<void> }> {
@@ -46,3 +46,10 @@ export const SITE_ROWS = [
   "INSERT INTO hits (q) VALUES ('capsid')",
   "INSERT INTO settings (k, v) VALUES ('theme', 'dark'), ('lang', 'en')",
 ];
+
+/** The drill's check of that name, or a throw naming the checks that did run. */
+export function checkOf(result: DrillResult, name: string) {
+  const c = result.checks.find((x) => x.name === name);
+  if (!c) throw new Error(`no ${name} check ran: ${result.checks.map((x) => x.name).join(", ")}`);
+  return c;
+}
