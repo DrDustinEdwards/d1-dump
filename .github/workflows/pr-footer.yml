@@ -18,4 +18,4 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: DrDustinEdwards/devkit/.github/workflows/pr-footer.yml@d92c2d87a1d14fa059cd256fa6b011fde8666f96 # v0.8.0
+    uses: DrDustinEdwards/devkit/.github/workflows/pr-footer.yml@6f4c67e69cc34285f2bdc63a1883912dc7f0c06e # v0.9.0
