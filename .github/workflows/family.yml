@@ -1,0 +1,21 @@
+name: family
+
+# devkit's family check: pins behind the newest release, local copies of shared code, a family feature this site lacks,
+# and British spelling. Exceptions are in .family.json with their reasons. What is shared:
+# https://github.com/DrDustinEdwards/devkit/blob/shared-list/SHARED.md
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: family-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  family:
+    uses: DrDustinEdwards/devkit/.github/workflows/family.yml@be78f8296e6c4dfc5cbf0aa17223f15ce4ff4ec8 # v0.13.1
