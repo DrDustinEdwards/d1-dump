@@ -73,7 +73,7 @@ export interface Scratch {
 
 export interface DrillOptions {
   // Creates an empty scratch database with this name. The name always starts with
-  // restore-drill-, so a leaked one is recognisable and nothing else is ever written.
+  // restore-drill-, so a leaked one is recognizable and nothing else is ever written.
   createScratch: (name: string) => Promise<Scratch>;
   // A pinned run prefix, e.g. backups/json/<run id>/. Defaults to the newest complete run.
   prefix?: string;
