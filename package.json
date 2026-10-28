@@ -30,7 +30,7 @@
     "@types/node": "24.19.2",
     "@vitest/coverage-v8": "4.1.12",
     "miniflare": "4.20260730.0",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vitest": "4.1.12"
   }
 }
