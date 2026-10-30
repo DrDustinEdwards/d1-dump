@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { cloudflareScratch } from "../src/cloudflare.js";
-import { directoryBucket } from "../src/node.js";
+import { directoryBucket, drillFromBucket } from "../src/node.js";
 import { D1_MAX_STATEMENT_BYTES, dumpDatabase, guardStatements, runRestoreDrill, scratchName, type D1Like, type R2Like } from "../src/index.js";
 import { SITE_ROWS, SITE_SCHEMA, checkOf, exec, rows, sandbox } from "./helpers.js";
 
@@ -234,6 +234,42 @@ test("a table holding a BLOB cannot be bound over REST, and says so", async () =
   await dumpDatabase(src, bucket, { now: NOW });
   const scratch = await cloudflareScratch("acct", "tok", fakeCloudflare(dst, []))("restore-drill-b");
   expect(() => scratch.db.prepare("INSERT INTO posts (cover) VALUES (?1)").bind([0, 255])).toThrow(/cannot bind a BLOB/);
+});
+
+// Cloudflare's R2 REST API in front of the Miniflare bucket: List Objects answers in the API's
+// envelope a page at a time, Get Object with the raw bytes.
+function fakeR2(bucket: R2Like, urls: string[]): typeof fetch {
+  const base = "https://api.cloudflare.com/client/v4/accounts/acct/r2/buckets/site-backups/objects";
+  return (async (input: string, init?: RequestInit) => {
+    urls.push(input);
+    if (new Headers(init?.headers).get("authorization") !== "Bearer tok") return new Response("{}", { status: 403 });
+    const url = new URL(input);
+    if (input.startsWith(`${base}?`)) {
+      const page = await bucket.list({ prefix: url.searchParams.get("prefix") ?? "", cursor: url.searchParams.get("cursor") ?? undefined });
+      const result_info = { is_truncated: page.truncated, cursor: page.cursor, per_page: 1000 };
+      return Response.json({ success: true, errors: [], result: page.objects.map((o) => ({ key: o.key })), result_info });
+    }
+    const obj = await bucket.get(decodeURIComponent(input.slice(base.length + 1)));
+    return obj ? new Response(await obj.text()) : Response.json({ success: false, errors: [{ code: 10007, message: "not found" }] }, { status: 404 });
+  }) as unknown as typeof fetch;
+}
+
+test("--bucket downloads the newest complete run, and only it, then drills it", async () => {
+  const older = await dumpDatabase(src, bucket, { now: new Date("2026-09-26T09:00:00.000Z") });
+  const newer = await dumpDatabase(src, bucket, { now: NOW });
+  const urls: string[] = [];
+  const run = (accountId?: string) =>
+    drillFromBucket({ accountId, apiToken: "tok", bucket: "site-backups", maxAgeHours: null, fetchImpl: fakeR2(bucket, urls) });
+
+  const { code, lines } = await run("acct");
+  expect(code).toBe(0);
+  expect(lines[0]).toMatch(new RegExp(`^restore drill PASSED: ${newer.prefix} into restore-drill-\\S+ \\(sqlite\\)$`));
+  expect(lines[1]).toBe(`downloaded ${newer.keys.length} objects of ${newer.prefix} from site-backups`);
+  expect(urls.filter((u) => u.includes(older.run_id))).toEqual([]);
+  expect(await run(undefined)).toEqual({ code: 3, lines: ["restore drill could not run: --bucket needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment"] });
+  const denied = await drillFromBucket({ accountId: "acct", apiToken: "wrong-token", bucket: "site-backups", fetchImpl: fakeR2(bucket, []) });
+  expect(denied.code).toBe(3);
+  expect(denied.lines.join("\n")).not.toContain("wrong-token");
 });
 
 test("only node.ts imports node:, so the package entry bundles into a Worker", () => {

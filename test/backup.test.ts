@@ -1,13 +1,25 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { BackupIncomplete, COMPLETE_MARKER, latestDump, runCheckedBackup, runIdFor, type D1Like, type R2Like } from "../src/index.js";
+import {
+  BackupIncomplete,
+  COMPLETE_MARKER,
+  backupFiles,
+  filesHealth,
+  latestDump,
+  runCheckedBackup,
+  runIdFor,
+  type D1Like,
+  type R2FilesLike,
+  type R2Like,
+} from "../src/index.js";
 import { SITE_ROWS, SITE_SCHEMA, exec, sandbox } from "./helpers.js";
 
 let src: D1Like;
 let bucket: R2Like;
+let media: R2FilesLike;
 let dispose: () => Promise<void>;
 
 beforeEach(async () => {
-  ({ src, bucket, dispose } = await sandbox());
+  ({ src, bucket, media, dispose } = await sandbox());
   await exec(src, [...SITE_SCHEMA, ...SITE_ROWS]);
 });
 afterEach(async () => dispose());
@@ -78,4 +90,56 @@ test("a counted table must match its live count, and all counted tables empty is
   const empty = (await runCheckedBackup(src, bucket, { now: NOW, counted: ["posts", "comments"] }).catch((e: unknown) => e)) as BackupIncomplete;
   expect(empty.problems).toEqual(["every counted table dumped empty"]);
   expect((await runCheckedBackup(src, bucket, { now: NOW, counted: ["settings"] })).dump.run_id).toBe(runIdFor(NOW));
+});
+
+test("files are copied once, re-copied when changed, and a deleted one is kept for its window, then removed", async () => {
+  const backup = bucket as unknown as R2FilesLike;
+  // Miniflare's proxy from Node back into workerd drops a stream's length, which a Worker's
+  // own R2 body keeps and put requires, so here the copy is handed the bytes.
+  const source: R2FilesLike = {
+    list: (o) => media.list(o),
+    put: (k, v, o) => media.put(k, v, o),
+    delete: (k) => media.delete(k),
+    get: async (k) => {
+      const o = await media.get(k);
+      if (!o) return null;
+      const bytes = await new Response(o.body as ReadableStream).arrayBuffer();
+      return { key: o.key, etag: o.etag, size: o.size, httpMetadata: o.httpMetadata, customMetadata: o.customMetadata, body: bytes, text: async () => "" };
+    },
+  };
+  const day = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
+  const photo = new Uint8Array(3 * 1024 * 1024).map((_, i) => i % 251);
+  await media.put("a.txt", "first", { httpMetadata: { contentType: "text/plain" }, customMetadata: { alt: "a note" } });
+  await media.put("img/photo.jpg", photo, { httpMetadata: { contentType: "image/jpeg" } });
+
+  // A run that reaches its budget saves where it was, and the next carries the pass on.
+  const first = await backupFiles(source, backup, { name: "media", now: day(0), maxObjects: 1 });
+  expect([first.complete, first.counts.copied]).toEqual([false, 1]);
+  expect(await filesHealth(backup, { name: "media", now: day(0) })).toMatchObject({ last_ok: null });
+  const rest = await backupFiles(source, backup, { name: "media", now: day(0) });
+  expect([rest.complete, rest.counts.copied]).toEqual([true, 2]);
+  const copy = await backup.get("files/media/a.txt");
+  expect([await copy?.text(), copy?.httpMetadata?.contentType, copy?.customMetadata?.alt]).toEqual(["first", "text/plain", "a note"]);
+  expect(new Uint8Array(await new Response((await backup.get("files/media/img/photo.jpg"))?.body as ReadableStream).arrayBuffer())).toEqual(photo);
+
+  expect((await backupFiles(source, backup, { name: "media", now: day(1) })).counts).toMatchObject({ objects: 2, copied: 0, skipped: 2 });
+
+  await media.put("a.txt", "second");
+  await media.delete("img/photo.jpg");
+  expect((await backupFiles(source, backup, { name: "media", now: day(2) })).counts).toMatchObject({ copied: 1, skipped: 0, kept_deleted: 1 });
+  expect(await (await backup.get("files/media/a.txt"))?.text()).toBe("second");
+
+  // A bucket lock refuses the removal: counted, kept, and tried again by the next pass.
+  const lock: R2FilesLike = {
+    list: (o) => backup.list(o),
+    get: (k) => backup.get(k),
+    put: (k, v, o) => backup.put(k, v, o),
+    delete: async () => {
+      throw new Error("delete: Object is locked by bucket policy (10069)");
+    },
+  };
+  expect((await backupFiles(source, lock, { name: "media", now: day(32) })).counts).toMatchObject({ removed: 0, locked: 1 });
+  expect((await backupFiles(source, backup, { name: "media", now: day(33) })).counts).toMatchObject({ objects: 1, removed: 1, locked: 0 });
+  expect(await backup.get("files/media/img/photo.jpg")).toBeNull();
+  expect(await filesHealth(backup, { name: "media", now: day(34) })).toEqual({ last_ok: day(33).toISOString(), age_hours: 24 });
 });

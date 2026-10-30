@@ -9,7 +9,7 @@ Each site installs it. D1 Time Travel already restores any minute of the last 30
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.6.0
+npm install github:DrDustinEdwards/d1-dump#v0.7.0
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -45,6 +45,27 @@ const backup = await backupHealth(env.BACKUPS);
 ```
 
 It warns past 26 hours by default (`staleHours`), and never throws.
+
+## Back up files
+
+A site's media and upload buckets are backed up into its backups bucket, beside the dumps, by the same nightly job:
+
+```ts
+import { backupFiles, filesHealth } from "@dustinedwards/d1-dump";
+
+await backupFiles(env.MEDIA, env.BACKUPS, { name: "media" }); // copies under files/media/<key>
+const files = await filesHealth(env.BACKUPS, { name: "media" }); // in /health, beside backup
+```
+
+Each object is copied to `files/<name>/<key>` with its `httpMetadata` and `customMetadata`, its body streamed from the source's `get` to the backup's `put`, never held whole. The copy carries the source's etag in its customMetadata (`d1-dump-source-etag`), so the next pass skips an object whose etag has not changed and copies one that has. The comparison is etag to etag, so it holds for a multipart object too, whose etag is not a digest of its bytes. An object listed in the source and gone before it is read is counted in `gone`, not an error.
+
+The source is walked in key order beside the backup's copies, so a copy with no source object is found in the same walk. It is kept for `keepDeletedDays` (default 30) from the pass that first saw it gone, then removed. An object that comes back before then stops the clock.
+
+**One run, one budget.** A run stops after `maxObjects` copies and removals (default 1000) or `timeBudgetMs` (default 5 minutes), whichever comes first, and saves the last key it handled in `files/<name>/_progress.json`. The next run goes on from that key. A key is used rather than R2's list cursor, which is not documented to outlive the run that made it. A Worker's limits are at developers.cloudflare.com/workers/platform/limits: 10,000 subrequests per invocation on Workers Paid, 30 seconds of CPU for a cron more often than hourly, and 15 minutes of wall time. A copy streams, so its CPU is small.
+
+**Complete.** The run that reaches the end of the walk writes `files/<name>/_complete.json` (`started_at`, `finished_at`, and the pass's counts: `objects`, `copied`, `skipped`, `gone`, `kept_deleted`, `removed`, `locked`, `reserved`). `filesHealth` reads it into the same `{ last_ok, age_hours, warning? }` as `backupHealth`, and warns past 26 hours (`staleHours`). A first pass over a large bucket can take several nights, and health warns until it finishes. A source key named `_progress.json` or `_complete.json` cannot be copied, since those are the backup's own names; it is returned in `reserved` and the pass is not marked complete.
+
+**Bucket locks.** R2 refuses to delete or overwrite an object a lock rule still holds (error 10069). A removal or a re-copy that a lock refuses is counted in `locked` and tried again by the next pass; the run goes on. Any other failure throws, and the next run resumes from the last saved key.
 
 ## Restore
 
@@ -105,7 +126,15 @@ npx d1-dump drill --dir ./dump                                  # sqlite, no cre
 CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... npx d1-dump drill --dir ./dump --backend d1
 ```
 
-With no `--backend`, the drill uses sqlite unless both Cloudflare variables are set, and its first output line says which ran and why (`backend: sqlite (no Cloudflare credentials are set)`). `--backend d1` without the variables is an error. The sqlite backend uses `node:sqlite`, built into Node (unflagged since 22.13; this package already requires Node 24.14.1), so it adds no dependency. Its scratch file lives in its own temporary directory, named `restore-drill-<date>-<pid>`, and the `scratch` check fails if the directory is still there after the delete. A batch is one transaction, as D1's is, and a BLOB comes back as a BLOB.
+From a bucket, which is how every site's CI runs the weekly drill:
+
+```sh
+CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... npx d1-dump drill --bucket <bucket name> [--prefix backups/json/]
+```
+
+`--bucket` lists the bucket through Cloudflare's R2 REST API, downloads the newest complete run under `--prefix` (default `backups/json/`) and nothing else, the objects its marker lists and then the marker, into a temporary directory, and drills it with sqlite. The token needs only R2 read on the bucket. It is sent only as the Authorization header and never printed. The directory is removed afterwards. The first line says what happened, and the exit code matches it: 0 `restore drill PASSED`, 1 `restore drill FAILED` (a check failed, including no complete run in the bucket), 3 `restore drill could not run` (no credentials, or the API refused or failed). `--backend d1` and `--max-age-hours` work as they do with `--dir`.
+
+With `--dir` and no `--backend`, the drill uses sqlite unless both Cloudflare variables are set, and its first output line says which ran and why (`backend: sqlite (no Cloudflare credentials are set)`). `--backend d1` without the variables is an error. The sqlite backend uses `node:sqlite`, built into Node (unflagged since 22.13; this package already requires Node 24.14.1), so it adds no dependency. Its scratch file lives in its own temporary directory, named `restore-drill-<date>-<pid>`, and the `scratch` check fails if the directory is still there after the delete. A batch is one transaction, as D1's is, and a BLOB comes back as a BLOB.
 
 The d1 backend's token needs to create and delete D1 databases, and that permission covers every database in the account, so keep it out of scheduled CI. It is read from the environment, sent only as the Authorization header, and never printed. `--prefix backups/json/<run id>/` pins a run (the newest complete one is used otherwise) and `--max-age-hours off` skips the freshness check. The exit code is 1 when any check fails.
 
@@ -133,11 +162,10 @@ Seven checks run, and each reports what it read, so "ok" cannot mean "read nothi
 
 **Over REST.** The d1 backend cannot bind a BLOB through the REST API, so a table holding one fails the `restore` check with a message saying so. The sqlite backend restores BLOBs. To drill such a database against D1 itself, run the drill from a Worker with a binding.
 
-**Running the d1 backend by hand.** It needs a token and creates a database, so it is run from the seat's machine, not scheduled. Download the newest complete run, then drill it:
+**Running the d1 backend by hand.** It needs a token and creates a database, so it is run from the seat's machine, not scheduled. The token needs R2 read and D1 edit:
 
 ```sh
-npx wrangler r2 object get <bucket>/backups/json/<run id>/_complete.json --file dump/backups/json/<run id>/_complete.json   # once per object in the run
-CLOUDFLARE_ACCOUNT_ID=<account id> CLOUDFLARE_API_TOKEN=<token> npx d1-dump drill --dir dump --backend d1
+CLOUDFLARE_ACCOUNT_ID=<account id> CLOUDFLARE_API_TOKEN=<token> npx d1-dump drill --bucket <bucket> --backend d1
 ```
 
 A d1 drill that dies before its `finally` leaves a database named `restore-drill-<date>-<pid>`. List them with `npx wrangler d1 list` and delete with `npx wrangler d1 delete <name>`.

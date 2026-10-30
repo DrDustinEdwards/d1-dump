@@ -31,7 +31,21 @@ export {
   type RetentionPolicy,
 } from "./runs.js";
 export { readPlan, type FtsMode, type FtsTable, type Plan, type SchemaEntry } from "./schema.js";
-export type { D1Like, D1Statement, R2Like } from "./types.js";
+export type { D1Like, D1Statement, R2FilesLike, R2HttpMetadataLike, R2Like, R2ObjectLike } from "./types.js";
+export {
+  DEFAULT_KEEP_DELETED_DAYS,
+  DEFAULT_MAX_OBJECTS,
+  DEFAULT_TIME_BUDGET_MS,
+  FILES_COMPLETE,
+  FILES_PREFIX,
+  SOURCE_ETAG,
+  backupFiles,
+  filesHealth,
+  type FilesComplete,
+  type FilesCounts,
+  type FilesOptions,
+  type FilesResult,
+} from "./files.js";
 export {
   D1_MAX_STATEMENT_BYTES,
   SCRATCH_PREFIX,

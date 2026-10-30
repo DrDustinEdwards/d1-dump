@@ -31,3 +31,34 @@ export interface R2Like {
   delete(keys: string | string[]): Promise<void>;
   createMultipartUpload(key: string, options?: { httpMetadata?: { contentType?: string } }): Promise<R2MultipartLike>;
 }
+
+// The parts of an R2 binding a file backup calls, on the source bucket and the backup bucket.
+// A body is passed from the source's get straight to the backup's put, so it streams.
+export interface R2HttpMetadataLike {
+  contentType?: string;
+  contentLanguage?: string;
+  contentDisposition?: string;
+  contentEncoding?: string;
+  cacheControl?: string;
+  cacheExpiry?: Date;
+}
+
+export interface R2ObjectLike {
+  key: string;
+  etag: string;
+  size: number;
+  httpMetadata?: R2HttpMetadataLike;
+  customMetadata?: Record<string, string>;
+}
+
+export interface R2FilesLike {
+  list(options: {
+    prefix?: string;
+    cursor?: string;
+    startAfter?: string;
+    include?: Array<"httpMetadata" | "customMetadata">;
+  }): Promise<{ objects: R2ObjectLike[]; truncated: boolean; cursor?: string }>;
+  get(key: string): Promise<(R2ObjectLike & { body: unknown; text(): Promise<string> }) | null>;
+  put(key: string, value: unknown, options?: { httpMetadata?: R2HttpMetadataLike; customMetadata?: Record<string, string> }): Promise<unknown>;
+  delete(keys: string | string[]): Promise<void>;
+}
