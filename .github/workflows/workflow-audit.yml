@@ -4,10 +4,13 @@ name: workflow-audit
 # it a full sha: scripts/check-callers.mjs fails on anything else. Exceptions go in .github/actionlint.yaml and
 # .github/zizmor.yml, each with its reason.
 
+# Only a change to a workflow or its exceptions can change what this finds.
 on:
   pull_request:
+    paths: [".github/**"]
   push:
     branches: [main]
+    paths: [".github/**"]
 
 permissions:
   contents: read
