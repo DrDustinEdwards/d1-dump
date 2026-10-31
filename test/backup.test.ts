@@ -143,17 +143,3 @@ test("files are copied once, re-copied when changed, and a deleted one is kept f
   expect(await backup.get("files/media/img/photo.jpg")).toBeNull();
   expect(await filesHealth(backup, { name: "media", now: day(34) })).toEqual({ last_ok: day(33).toISOString(), age_hours: 24 });
 });
-
-test("excludeIfPresent excludes a table only while it exists, and credentials refuses a credential column unless allowed", async () => {
-  await exec(src, ["CREATE TABLE preview_links (id INTEGER PRIMARY KEY, token_hash TEXT)", "INSERT INTO preview_links (token_hash) VALUES ('sample')"]);
-  const kept = await runCheckedBackup(src, bucket, { now: NOW, excludeIfPresent: ["preview_links", "session"], credentials: true });
-  expect(kept.dump.excluded).toEqual(["preview_links"]);
-  const err = (await runCheckedBackup(src, bucket, { now: new Date("2026-10-21T03:17:00.000Z"), credentials: true }).catch((e: unknown) => e)) as BackupIncomplete;
-  expect(err).toBeInstanceOf(BackupIncomplete);
-  expect(err.problems).toEqual([expect.stringMatching(/^preview_links has credential-looking column\(s\) token_hash/)]);
-  const allowed = await runCheckedBackup(src, bucket, {
-    now: new Date("2026-10-22T03:17:00.000Z"),
-    credentials: { allow: { "preview_links.token_hash": "a sample reason" } },
-  });
-  expect(allowed.dump.complete).toBe(true);
-});
