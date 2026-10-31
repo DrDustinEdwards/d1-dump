@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { cloudflareScratch } from "../src/cloudflare.js";
-import { directoryBucket, drillFromBucket } from "../src/node.js";
-import { D1_MAX_STATEMENT_BYTES, dumpDatabase, guardStatements, runRestoreDrill, scratchName, type D1Like, type R2Like } from "../src/index.js";
+import { directoryBucket, drillFilesFromBucket, drillFromBucket } from "../src/node.js";
+import { D1_MAX_STATEMENT_BYTES, dumpDatabase, guardStatements, runRestoreDrill, scratchName, type D1Like, type R2FilesLike, type R2Like } from "../src/index.js";
 import { SITE_ROWS, SITE_SCHEMA, checkOf, exec, rows, sandbox } from "./helpers.js";
 
 let src: D1Like;
@@ -294,4 +294,30 @@ test("only node.ts imports node:, so the package entry bundles into a Worker", (
   const withNode = files.filter((f) => /from "node:/.test(readFileSync(join(dir, f), "utf8")));
   expect(withNode.sort()).toEqual(["node.ts"]);
   expect(readFileSync(join(dir, "index.ts"), "utf8")).not.toMatch(/\.\/(cli|node)\.js/);
+});
+
+test("drill-files restores a sample of each files backup into scratch and checks the bytes against the copy and its etag", async () => {
+  // A files backup as backupFiles leaves it: the copies under files/media/ and its marker.
+  for (let i = 0; i < 8; i++) await (bucket as unknown as R2FilesLike).put(`files/media/img/${i}.bin`, new Uint8Array(Array.from({ length: 300 + i }, (_, j) => (i * 31 + j) % 256)));
+  await bucket.put("files/media/_complete.json", "{}");
+  const base = "https://api.cloudflare.com/client/v4/accounts/acct/r2/buckets/site-backups/objects";
+  // The REST API's list envelope and Get Object with the object's bytes and etag; `lie` names a key whose etag is wrong.
+  const rest = (lie?: string) =>
+    (async (input: string) => {
+      if (input.startsWith(`${base}?`)) {
+        const page = await bucket.list({ prefix: new URL(input).searchParams.get("prefix") ?? "" });
+        return Response.json({ success: true, errors: [], result: page.objects.map((o) => ({ key: o.key })), result_info: { is_truncated: false } });
+      }
+      const key = decodeURIComponent(input.slice(base.length + 1));
+      const obj = (await (bucket as unknown as R2FilesLike).get(key)) as unknown as { etag: string; arrayBuffer(): Promise<ArrayBuffer> } | null;
+      if (!obj) return Response.json({ success: false, errors: [{ message: "not found" }] }, { status: 404 });
+      return new Response(await obj.arrayBuffer(), { headers: { etag: `"${key.endsWith(lie ?? "-") ? "0".repeat(32) : obj.etag}"` } });
+    }) as unknown as typeof fetch;
+  const passed = await drillFilesFromBucket({ accountId: "acct", apiToken: "tok", bucket: "site-backups", sample: 3, fetchImpl: rest() });
+  expect(passed.lines.join("\n")).toMatch(/files drill PASSED: media/);
+  expect(passed.code).toBe(0);
+  expect(passed.lines.filter((l) => /bytes match and the etag/.test(l))).toHaveLength(3);
+  const lied = await drillFilesFromBucket({ accountId: "acct", apiToken: "tok", bucket: "site-backups", sample: 8, fetchImpl: rest("img/3.bin") });
+  expect(lied.code).toBe(1);
+  expect(lied.lines.join("\n")).toMatch(/FAIL img\/3\.bin: MD5 \S+ is not the etag 0{32}/);
 });

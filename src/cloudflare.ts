@@ -95,6 +95,8 @@ export function cloudflareScratch(accountId: string, apiToken: string, fetchImpl
 // Read only. `stream` hands back an object's body unread, so a download never holds it whole.
 export interface RestBucket extends R2Like {
   stream(key: string): Promise<ReadableStream<Uint8Array> | null>;
+  // The object's whole response (its body and headers, the etag among them), or null when there is none.
+  response(key: string): Promise<Response | null>;
 }
 
 export function cloudflareBucket(accountId: string, apiToken: string, bucketName: string, fetchImpl: typeof fetch = fetch): RestBucket {
@@ -125,6 +127,7 @@ export function cloudflareBucket(accountId: string, apiToken: string, bucketName
       const res = await object(key);
       return res && res.body;
     },
+    response: object,
     put: readOnly,
     delete: readOnly,
     createMultipartUpload: readOnly,
