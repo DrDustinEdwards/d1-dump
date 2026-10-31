@@ -224,3 +224,102 @@ export async function filesHealth(backup: R2FilesLike, options: { name: string; 
   if (!marker) return { last_ok: null, age_hours: null, warning: `no complete files pass of ${options.name} found` };
   return ageOf(marker.finished_at, options.now ?? new Date(), staleHours, "files pass");
 }
+
+export interface RestoreFilesOptions {
+  // The files backup to restore from: the copies under files/<name>/.
+  name: string;
+  // Only keys starting with this, as the source named them ("" for the whole backup).
+  prefix?: string;
+  // False (the default) is a dry run: nothing is written, and the result says what would be.
+  apply?: boolean;
+  // A target object that exists and differs from its copy is left alone unless this is set.
+  overwrite?: boolean;
+  // Go on from a key a stopped run returned in `after`.
+  after?: string;
+  // Writes one run may make, and how long it may take (backupFiles' defaults).
+  maxObjects?: number;
+  timeBudgetMs?: number;
+}
+
+export interface RestoreFilesCounts {
+  // Copies examined.
+  objects: number;
+  // Absent from the target: restored, or would be on a dry run.
+  missing: number;
+  // Present in the target at the copy's source etag: nothing to do.
+  same: number;
+  // Present with other bytes: left alone, or overwritten (or would be) with `overwrite`.
+  differs: number;
+  // Writes made (always 0 on a dry run).
+  written: number;
+}
+
+export interface RestoreFilesResult {
+  name: string;
+  applied: boolean;
+  // Whether the walk reached the end. If not, run again with `after`.
+  complete: boolean;
+  after: string | null;
+  counts: RestoreFilesCounts;
+  // The first 100 keys restored or that would be, and the first 100 that differ.
+  restore: string[];
+  differ: string[];
+}
+
+const LISTED = 100;
+
+// Copies a files backup's copies back into a bucket: files/<name>/<key> to <key>, with the
+// httpMetadata and customMetadata it was backed up with (less d1-dump's own etag field), each
+// body streamed. A dry run unless `apply` is true. A key already in the target at the same
+// version is left; one that differs is left unless `overwrite` is set, so a restore into the
+// live bucket only puts back what is missing. The target is walked beside the copies in key
+// order, so it is listed once rather than read per key. Like backupFiles, a run stops at
+// maxObjects writes or timeBudgetMs and returns `after` to go on from.
+export async function restoreFiles(backup: R2FilesLike, target: R2FilesLike, options: RestoreFilesOptions): Promise<RestoreFilesResult> {
+  const { name, prefix = "", apply = false, overwrite = false } = options;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) throw new Error(`d1-dump: a files backup name is letters, digits, '.', '_' and '-', not ${JSON.stringify(name)}`);
+  const maxObjects = options.maxObjects ?? DEFAULT_MAX_OBJECTS;
+  const deadline = Date.now() + (options.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS);
+  const base = `${FILES_PREFIX}${name}/`;
+  const own = new Set([`${base}${FILES_PROGRESS}`, `${base}${FILES_COMPLETE}`]);
+  const counts: RestoreFilesCounts = { objects: 0, missing: 0, same: 0, differs: 0, written: 0 };
+  const restore: string[] = [];
+  const differ: string[] = [];
+  let after = options.after ?? null;
+
+  const copies = listFrom(backup, `${base}${prefix}`, after === null ? undefined : `${base}${after}`);
+  const targets = listFrom(target, prefix, after ?? undefined);
+  let t = await targets.next();
+  for await (const copy of copies) {
+    if (own.has(copy.key)) continue;
+    if (counts.written >= maxObjects || Date.now() >= deadline) {
+      return { name, applied: apply, complete: false, after, counts, restore, differ };
+    }
+    const key = copy.key.slice(base.length);
+    while (!t.done && compareKeys(t.value.key, key) < 0) t = await targets.next();
+    const held = !t.done && t.value.key === key ? t.value : null;
+    counts.objects++;
+    let write = false;
+    if (!held) {
+      counts.missing++;
+      if (restore.length < LISTED) restore.push(key);
+      write = true;
+    } else if (held.etag === copy.customMetadata?.[SOURCE_ETAG]) {
+      counts.same++;
+    } else {
+      counts.differs++;
+      if (differ.length < LISTED) differ.push(key);
+      write = overwrite;
+    }
+    if (write && apply) {
+      const obj = await backup.get(copy.key);
+      if (obj) {
+        const { [SOURCE_ETAG]: _etag, ...customMetadata } = obj.customMetadata ?? {};
+        await target.put(key, obj.body, { httpMetadata: obj.httpMetadata, customMetadata });
+        counts.written++;
+      }
+    }
+    after = key;
+  }
+  return { name, applied: apply, complete: true, after: null, counts, restore, differ };
+}
