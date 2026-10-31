@@ -7,10 +7,24 @@ name: dependencies
 # A pull request or push runs it only when a manifest or lockfile changes; the daily run finds a new advisory.
 on:
   pull_request:
-    paths: ["**/package.json", "**/package-lock.json", "**/pnpm-lock.yaml", "**/requirements*.txt", "**/pyproject.toml", "osv-scanner.toml", ".github/workflows/dependencies.yml"]
+    paths:
+      - "**/package.json"
+      - "**/package-lock.json"
+      - "**/pnpm-lock.yaml"
+      - "**/requirements*.txt"
+      - "**/pyproject.toml"
+      - "osv-scanner.toml"
+      - ".github/workflows/dependencies.yml"
   push:
     branches: [main]
-    paths: ["**/package.json", "**/package-lock.json", "**/pnpm-lock.yaml", "**/requirements*.txt", "**/pyproject.toml", "osv-scanner.toml", ".github/workflows/dependencies.yml"]
+    paths:
+      - "**/package.json"
+      - "**/package-lock.json"
+      - "**/pnpm-lock.yaml"
+      - "**/requirements*.txt"
+      - "**/pyproject.toml"
+      - "osv-scanner.toml"
+      - ".github/workflows/dependencies.yml"
   schedule:
     - cron: "17 6 * * *"
 
