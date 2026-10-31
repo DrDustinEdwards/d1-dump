@@ -25,7 +25,7 @@ jobs:
     # A called workflow holds no more than this job grants: the write lets it push code-map.json to the code-map branch.
     permissions:
       contents: write
-    uses: DrDustinEdwards/devkit/.github/workflows/code-map.yml@956dc10b8a0fbf3128df41c7c21c9441392fabda # v0.20.5
+    uses: DrDustinEdwards/devkit/.github/workflows/code-map.yml@d9d5a3448a50f183c3c8b4a5f293717728717245 # v0.20.8
     with:
       coverage-command: npx vitest run --coverage.enabled --coverage.provider=v8 --coverage.reporter=json --coverage.include=src/**
       mutation-command: ${{ github.event_name != 'push' && 'npm i --no-save @stryker-mutator/core@9.6.1 @stryker-mutator/vitest-runner@9.6.1 && for c in drill dump restore runs rest; do STRYKER_CHUNK=$c npx stryker run; done' || '' }}
