@@ -1,0 +1,21 @@
+name: workflow-audit
+
+# The caller a repository keeps. Replace the sha with the devkit commit that holds the reviewed workflow-audit.yml, and keep
+# it a full sha: scripts/check-callers.mjs fails on anything else. Exceptions go in .github/actionlint.yaml and
+# .github/zizmor.yml, each with its reason.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-audit-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  workflow-audit:
+    uses: DrDustinEdwards/devkit/.github/workflows/workflow-audit.yml@e99e4651b943f83b6591309b2151e7332786e64a # v0.20.2
