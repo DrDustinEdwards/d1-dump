@@ -1,0 +1,30 @@
+name: release
+
+# Merging a version bump to main is the release: devkit's release.yml tags it and publishes the GitHub release, then
+# bump-consumers.yml starts Renovate in every repository that depends on it. Run it by hand to release a version that
+# merged without a tag (0.7.0 did).
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json, CHANGELOG.md, .github/workflows/release.yml]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    uses: DrDustinEdwards/devkit/.github/workflows/release.yml@956dc10b8a0fbf3128df41c7c21c9441392fabda # v0.20.5
+
+  bump:
+    needs: release
+    if: needs.release.outputs.created == 'true'
+    uses: DrDustinEdwards/devkit/.github/workflows/bump-consumers.yml@956dc10b8a0fbf3128df41c7c21c9441392fabda # v0.20.5
+    secrets:
+      token: ${{ secrets.RENOVATE_TRIGGER_TOKEN }}
