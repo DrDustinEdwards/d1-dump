@@ -12,7 +12,16 @@ export {
   type PagedTable,
   type SchemaSidecar,
 } from "./dump.js";
-export { BackupIncomplete, runCheckedBackup, standardProblems, type BackupOptions, type BackupResult } from "./backup.js";
+export {
+  BackupIncomplete,
+  CREDENTIAL_COLUMN,
+  columnNames,
+  credentialProblems,
+  runCheckedBackup,
+  standardProblems,
+  type BackupOptions,
+  type BackupResult,
+} from "./backup.js";
 export { restoreDump, type RestoreOptions, type RestoreResult } from "./restore.js";
 export {
   DEFAULT_MIN_KEPT,
