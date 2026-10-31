@@ -40,11 +40,11 @@ export const SITE_SCHEMA = [
 ];
 
 export const SITE_ROWS = [
-  "INSERT INTO posts (slug, body, cover) VALUES ('first', 'phage capsid packaging', X'00FF10')",
-  "INSERT INTO posts (slug, body, cover) VALUES ('second', 'tail fibre binding', NULL)",
+  "INSERT INTO posts (slug, body, cover) VALUES ('first', 'getting started guide', X'00FF10')",
+  "INSERT INTO posts (slug, body, cover) VALUES ('second', 'spring update notes', NULL)",
   "INSERT INTO comments (id, post_id, text) VALUES (1, 1, 'nice'), (2, 1, 'agreed'), (3, 2, 'hm')",
-  "INSERT INTO glossary (rowid, term, meaning) VALUES (7, 'capsid', 'the protein shell'), (9, 'virion', 'a whole particle')",
-  "INSERT INTO hits (q) VALUES ('capsid')",
+  "INSERT INTO glossary (rowid, term, meaning) VALUES (7, 'draft', 'a post not yet published'), (9, 'slug', 'the name in a link')",
+  "INSERT INTO hits (q) VALUES ('guide')",
   "INSERT INTO settings (k, v) VALUES ('theme', 'dark'), ('lang', 'en')",
 ];
 

@@ -61,9 +61,9 @@ test("a good dump passes every check, and the scratch database is deleted", asyn
 // a 141 KB paper as one literal INSERT, over D1's 100 KB statement cap. The JSON dump
 // binds each value, so the same row goes in as a short statement.
 test("a 141 KB value with newlines and quotes restores byte for byte, and no statement sent is over the cap", { timeout: 120_000 }, async () => {
-  const paper = ("Phage isolation: it's 'quoted' \"twice\"\nline two\r\nline three\\n\n" + "capsid ".repeat(40)).repeat(420);
+  const paper = ("Release summary: it's 'quoted' \"twice\"\nline two\r\nline three\\n\n" + "update ".repeat(40)).repeat(420);
   expect(new TextEncoder().encode(paper).length).toBeGreaterThan(141_000);
-  const big = "tail fibre\n".repeat(140_000);
+  const big = "field note\n".repeat(140_000);
   await exec(src, ["CREATE TABLE papers (id INTEGER PRIMARY KEY, body TEXT)"]);
   await src.prepare("INSERT INTO papers (body) VALUES (?1)").bind(paper).run();
   await src.prepare("INSERT INTO papers (body) VALUES (?1)").bind(big).run();
@@ -222,7 +222,7 @@ test("the REST scratch adapter creates, fills and deletes a database named resto
 test("the REST adapter refuses a name that is not a scratch name, and never echoes the token", async () => {
   const calls: Array<{ method: string; path: string; auth: string | null; body: unknown }> = [];
   const create = cloudflareScratch("acct", "secret-token", fakeCloudflare(dst, calls));
-  await expect(create("dustinedwards")).rejects.toThrow(/refusing to create "dustinedwards"/);
+  await expect(create("production-db")).rejects.toThrow(/refusing to create "production-db"/);
   expect(calls).toEqual([]);
   const failing = cloudflareScratch("acct", "secret-token", (async () => new Response(JSON.stringify({ success: false, result: null, errors: [{ message: "bad token" }] }), { status: 403 })) as unknown as typeof fetch);
   const err = await failing("restore-drill-x").catch((e: Error) => e);

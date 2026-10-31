@@ -57,7 +57,7 @@ test("sqlite: a good dump passes every check, and a BLOB comes back as a BLOB", 
 });
 
 test("sqlite: a 141 KB value with newlines restores byte for byte and no statement is over the cap", async () => {
-  const paper = ("Phage isolation: it's 'quoted' \"twice\"\nline two\r\nline three\\n\n" + "capsid ".repeat(40)).repeat(420);
+  const paper = ("Release summary: it's 'quoted' \"twice\"\nline two\r\nline three\\n\n" + "update ".repeat(40)).repeat(420);
   await exec(src, ["CREATE TABLE papers (id INTEGER PRIMARY KEY, body TEXT)"]);
   await src.prepare("INSERT INTO papers (body) VALUES (?1)").bind(paper).run();
   await dumpDatabase(src, bucket, { now: NOW });

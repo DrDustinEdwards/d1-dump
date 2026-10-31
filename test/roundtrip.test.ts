@@ -46,11 +46,11 @@ test("a dump restored into a scratch database matches the source, row for row", 
     expect(await rows(dst, sql)).toEqual(await rows(src, sql));
   }
   // Search works on the copy: the external index rebuilt, the internal one restored.
-  expect(await rows(dst, "SELECT rowid FROM posts_fts WHERE posts_fts MATCH 'capsid'")).toEqual([{ rowid: 1 }]);
-  expect(await rows(dst, "SELECT rowid FROM glossary WHERE glossary MATCH 'shell'")).toEqual([{ rowid: 7 }]);
+  expect(await rows(dst, "SELECT rowid FROM posts_fts WHERE posts_fts MATCH 'guide'")).toEqual([{ rowid: 1 }]);
+  expect(await rows(dst, "SELECT rowid FROM glossary WHERE glossary MATCH 'published'")).toEqual([{ rowid: 7 }]);
   // Triggers were created after the rows, and work on new ones.
-  await exec(dst, ["INSERT INTO posts (slug, body) VALUES ('third', 'portal vertex')"]);
-  expect(await rows(dst, "SELECT rowid FROM posts_fts WHERE posts_fts MATCH 'portal'")).toEqual([{ rowid: 3 }]);
+  await exec(dst, ["INSERT INTO posts (slug, body) VALUES ('third', 'annual report')"]);
+  expect(await rows(dst, "SELECT rowid FROM posts_fts WHERE posts_fts MATCH 'annual'")).toEqual([{ rowid: 3 }]);
   // AUTOINCREMENT carried on from the restored ids rather than restarting.
   expect(await rows(dst, "SELECT id FROM posts WHERE slug = 'third'")).toEqual([{ id: 3 }]);
 });
