@@ -50,10 +50,14 @@ export {
   SOURCE_ETAG,
   backupFiles,
   filesHealth,
+  restoreFiles,
   type FilesComplete,
   type FilesCounts,
   type FilesOptions,
   type FilesResult,
+  type RestoreFilesCounts,
+  type RestoreFilesOptions,
+  type RestoreFilesResult,
 } from "./files.js";
 export {
   D1_MAX_STATEMENT_BYTES,

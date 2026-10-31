@@ -9,7 +9,7 @@ Each site installs it. D1 Time Travel already restores any minute of the last 30
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.8.0
+npm install github:DrDustinEdwards/d1-dump#v0.9.0
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -66,6 +66,21 @@ The source is walked in key order beside the backup's copies, so a copy with no 
 **Complete.** The run that reaches the end of the walk writes `files/<name>/_complete.json` (`started_at`, `finished_at`, and the pass's counts: `objects`, `copied`, `skipped`, `gone`, `kept_deleted`, `removed`, `locked`, `reserved`). `filesHealth` reads it into the same `{ last_ok, age_hours, warning? }` as `backupHealth`, and warns past 26 hours (`staleHours`). A first pass over a large bucket can take several nights, and health warns until it finishes. A source key named `_progress.json` or `_complete.json` cannot be copied, since those are the backup's own names; it is returned in `reserved` and the pass is not marked complete.
 
 **Bucket locks.** R2 refuses to delete or overwrite an object a lock rule still holds (error 10069). A removal or a re-copy that a lock refuses is counted in `locked` and tried again by the next pass; the run goes on. Any other failure throws, and the next run resumes from the last saved key.
+
+## Restore files
+
+```ts
+import { restoreFiles } from "@dustinedwards/d1-dump";
+
+const plan = await restoreFiles(env.BACKUPS, env.MEDIA, { name: "media", prefix: "img/2026/" }); // a dry run
+const done = await restoreFiles(env.BACKUPS, env.MEDIA, { name: "media", prefix: "img/2026/", apply: true });
+```
+
+`restoreFiles(backup, target, { name, prefix, apply, overwrite })` copies a files backup back into a bucket: `files/<name>/<key>` to `<key>`, with the `httpMetadata` and `customMetadata` it was backed up with (less `d1-dump-source-etag`), each body streamed. **It is a dry run unless `apply` is true**: nothing is written, and the result says what would be. `prefix` limits it to keys that start with it, as the source named them (`""`, the default, is the whole backup).
+
+Each copy is compared with the target, which is listed once beside the backup in key order rather than read per key: a key the target lacks is `missing` and is restored; one at the copy's version is `same`; one with other bytes `differs` and is left alone unless `overwrite` is set, so a restore into the live bucket puts back only what was lost. The result has the counts (`objects`, `missing`, `same`, `differs`, `written`) and the first 100 keys of each list (`restore`, `differ`). Like `backupFiles`, a run stops at `maxObjects` writes or `timeBudgetMs` and returns `complete: false` with `after`; pass it back as `after` to go on. The backup holds the newest version of each file and keeps a deleted one for `keepDeletedDays` (30) after the pass that first saw it gone, so a file deleted longer ago than that, or an older version of one since replaced, is not in it.
+
+From a seat with no Worker, one file goes back with wrangler: `npx wrangler r2 object get <backups bucket>/files/<name>/<key> --file <local file> --remote`, then `npx wrangler r2 object put <bucket>/<key> --file <local file> --content-type <type> --remote`.
 
 ## Restore
 
@@ -173,6 +188,15 @@ CLOUDFLARE_ACCOUNT_ID=<account id> CLOUDFLARE_API_TOKEN=<token> npx d1-dump dril
 ```
 
 A d1 drill that dies before its `finally` leaves a database named `restore-drill-<date>-<pid>`. List them with `npx wrangler d1 list` and delete with `npx wrangler d1 delete <name>`.
+
+**Measured against a local D1 (31 Oct 2026).** The drill's restore and checks were run with a scratch database on the D1 that `wrangler d1 --local` runs (Miniflare 4.20260730.0, workerd's D1), rather than on Node's SQLite, through `runRestoreDrill` with `createScratch` handing it a fresh Miniflare D1, as `test/drill.test.ts` does at a small size:
+
+| Database | Tables | Rows | Dump size | Dump | Restore and checks | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| a copy of a site's local database (dustinedwards.info), 3 FTS5 tables | 35 | 1,422 | 8.3 MB | 1.4 s | 18.9 s | all seven checks passed; 1,637 statements in 28 batches, the longest 1,589 bytes, the largest bound value 141,043 bytes |
+| synthetic: one table of 2 KB rows with an external FTS5 index | 1 | 20,000 | 38 MB | 2.0 s | 2 min 55 s | all seven checks passed |
+
+So the restore's statements and bound values are accepted by D1's own engine, the 141 KB value included, and on this machine the restore took 2 to 5 seconds a megabyte of dump. What this does not prove: Cloudflare's remote D1 and its REST API limits, which only the d1 backend above measures, and that run still needs a token that can create a database. That number, with a timed D1 Time Travel restore, is still owed: neither has been run against a remote database.
 
 ## Tests
 

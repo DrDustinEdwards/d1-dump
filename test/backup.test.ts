@@ -5,6 +5,7 @@ import {
   backupFiles,
   filesHealth,
   latestDump,
+  restoreFiles,
   runCheckedBackup,
   runIdFor,
   type D1Like,
@@ -142,6 +143,46 @@ test("files are copied once, re-copied when changed, and a deleted one is kept f
   expect((await backupFiles(source, backup, { name: "media", now: day(33) })).counts).toMatchObject({ objects: 1, removed: 1, locked: 0 });
   expect(await backup.get("files/media/img/photo.jpg")).toBeNull();
   expect(await filesHealth(backup, { name: "media", now: day(34) })).toEqual({ last_ok: day(33).toISOString(), age_hours: 24 });
+});
+
+// Miniflare's proxy drops a stream's length, which put needs, so a get here hands over the bytes.
+function bytesOut(r2: R2FilesLike): R2FilesLike {
+  return {
+    list: (o) => r2.list(o),
+    put: (k, v, o) => r2.put(k, v, o),
+    delete: (k) => r2.delete(k),
+    get: async (k) => {
+      const o = await r2.get(k);
+      if (!o) return null;
+      const bytes = await new Response(o.body as ReadableStream).arrayBuffer();
+      return { key: o.key, etag: o.etag, size: o.size, httpMetadata: o.httpMetadata, customMetadata: o.customMetadata, body: bytes, text: async () => "" };
+    },
+  };
+}
+
+test("restoreFiles is a dry run by default, puts back what is missing, and overwrites a changed file only when asked", async () => {
+  const backup = bytesOut(bucket as unknown as R2FilesLike);
+  await media.put("a.txt", "first", { httpMetadata: { contentType: "text/plain" }, customMetadata: { alt: "a note" } });
+  await media.put("img/b.txt", "kept");
+  await media.put("img/c.txt", "original");
+  await backupFiles(bytesOut(media), backup, { name: "media", now: NOW });
+  await media.delete("a.txt");
+  await media.put("img/c.txt", "edited since");
+
+  const dry = await restoreFiles(backup, media, { name: "media" });
+  expect([dry.applied, dry.complete, dry.counts, dry.restore, dry.differ]).toEqual([
+    false, true, { objects: 3, missing: 1, same: 1, differs: 1, written: 0 }, ["a.txt"], ["img/c.txt"],
+  ]);
+  expect(await media.get("a.txt")).toBeNull();
+
+  expect((await restoreFiles(backup, media, { name: "media", apply: true })).counts.written).toBe(1);
+  const back = await media.get("a.txt");
+  expect([await back?.text(), back?.httpMetadata?.contentType, back?.customMetadata]).toEqual(["first", "text/plain", { alt: "a note" }]);
+  expect(await (await media.get("img/c.txt"))?.text()).toBe("edited since");
+
+  const only = await restoreFiles(backup, media, { name: "media", prefix: "img/", apply: true, overwrite: true });
+  expect(only.counts).toEqual({ objects: 2, missing: 0, same: 1, differs: 1, written: 1 });
+  expect(await (await media.get("img/c.txt"))?.text()).toBe("original");
 });
 
 test("excludeIfPresent excludes a table only while it exists, and credentials refuses a credential column unless allowed", async () => {
