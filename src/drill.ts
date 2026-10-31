@@ -226,7 +226,13 @@ async function verify(db: D1Like, bucket: R2Like, marker: CompleteMarker, check:
   }
   check("fts", behind.length === 0, behind.length > 0 ? behind.join("; ") : `${marker.fts.length} FTS5 tables, ${indexed} indexed documents`);
 
-  // One search: the first external or internal index that holds a document.
+  // One search: the first external or internal index that holds a document. A database
+  // with no FTS5 table at all (foxhound) has nothing to search, which is a pass that says
+  // so; a database that has FTS5 tables but none that yields a word still fails.
+  if (marker.fts.length === 0) {
+    check("search", true, "no FTS5 tables in this database, so there is no index to search");
+    return;
+  }
   for (const f of marker.fts) {
     if (f.mode === "contentless") continue;
     const source = f.mode === "external" ? f.content! : f.name;

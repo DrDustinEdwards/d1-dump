@@ -146,7 +146,7 @@ Seven checks run, and each reports what it read, so "ok" cannot mean "read nothi
 | `restore` | `restoreDump` throws, which includes its own count check against the marker |
 | `counts` | a table, counted again after the restore, differs from the marker, or the copy holds no rows |
 | `fts` | an external FTS5 index holds fewer documents than its content table (counted through `_docsize`, because `COUNT(*)` on an external-content FTS5 table reads through to the content table and cannot disagree), or an internal one fewer than the dump held |
-| `search` | a word taken from a restored row is not found through the index, or no FTS5 table held a word to search for |
+| `search` | a word taken from a restored row is not found through the index, or the database has FTS5 tables but none held a word to search for (a database with no FTS5 table passes and says so) |
 | `statements` | any statement sent was over D1's 100,000 byte cap, or none was sent |
 | `scratch` | the scratch database was not deleted; the detail names it |
 
