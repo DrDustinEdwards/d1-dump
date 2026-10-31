@@ -1,5 +1,5 @@
 import { SCRATCH_PREFIX, type Scratch } from "./drill.js";
-import type { D1Like, D1Statement } from "./types.js";
+import type { D1Like, D1Statement, R2Like } from "./types.js";
 
 // A scratch D1 database reached over Cloudflare's REST API, for a drill run from Node
 // or CI where there is no binding. Needs an API token that can create and delete D1
@@ -14,7 +14,24 @@ const API = "https://api.cloudflare.com/client/v4";
 interface Envelope<T> {
   success: boolean;
   result: T;
+  result_info?: { cursor?: string; is_truncated?: boolean };
   errors?: Array<{ code?: number; message?: string }>;
+}
+
+// The API's JSON envelope, or a throw naming the call and the API's own errors.
+async function envelope<T>(res: Response, label: string): Promise<Envelope<T>> {
+  const text = await res.text();
+  let parsed: Envelope<T>;
+  try {
+    parsed = JSON.parse(text) as Envelope<T>;
+  } catch {
+    throw new Error(`d1-dump: ${label} answered ${res.status} with a body that is not JSON`);
+  }
+  if (!res.ok || !parsed.success) {
+    const why = (parsed.errors ?? []).map((e) => e.message ?? String(e.code)).join("; ");
+    throw new Error(`d1-dump: ${label} failed (${res.status}): ${why || "no error given"}`);
+  }
+  return parsed;
 }
 
 interface Query {
@@ -49,18 +66,7 @@ export function cloudflareScratch(accountId: string, apiToken: string, fetchImpl
       headers: { authorization: `Bearer ${apiToken}`, "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    const text = await res.text();
-    let parsed: Envelope<T>;
-    try {
-      parsed = JSON.parse(text) as Envelope<T>;
-    } catch {
-      throw new Error(`d1-dump: ${method} ${path} answered ${res.status} with a body that is not JSON`);
-    }
-    if (!res.ok || !parsed.success) {
-      const why = (parsed.errors ?? []).map((e) => e.message ?? String(e.code)).join("; ");
-      throw new Error(`d1-dump: ${method} ${path} failed (${res.status}): ${why || "no error given"}`);
-    }
-    return parsed.result;
+    return (await envelope<T>(res, `${method} ${path}`)).result;
   };
 
   return async (name) => {
@@ -80,5 +86,47 @@ export function cloudflareScratch(accountId: string, apiToken: string, fetchImpl
       },
     };
     return { db, delete: async () => void (await call("DELETE", `/d1/database/${id}`)) };
+  };
+}
+
+// An R2 bucket read over the REST API, for a drill run from CI with no binding: List Objects
+// (GET /accounts/{account_id}/r2/buckets/{bucket_name}/objects) and Get Object (the same
+// path plus the key, its slashes sent as they are, answering with the object's raw bytes).
+// Read only. `stream` hands back an object's body unread, so a download never holds it whole.
+export interface RestBucket extends R2Like {
+  stream(key: string): Promise<ReadableStream<Uint8Array> | null>;
+}
+
+export function cloudflareBucket(accountId: string, apiToken: string, bucketName: string, fetchImpl: typeof fetch = fetch): RestBucket {
+  const objects = `${API}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects`;
+  const headers = { authorization: `Bearer ${apiToken}` };
+  const readOnly = async (): Promise<never> => {
+    throw new Error("d1-dump: a bucket read over REST is read only");
+  };
+  const object = async (key: string): Promise<Response | null> => {
+    const res = await fetchImpl(`${objects}/${key.split("/").map(encodeURIComponent).join("/")}`, { headers });
+    if (res.status === 404) return null;
+    if (!res.ok) await envelope(res, `GET ${bucketName}/${key}`);
+    return res;
+  };
+  return {
+    list: async ({ prefix = "", cursor }) => {
+      const query = new URLSearchParams({ prefix, per_page: "1000" });
+      if (cursor) query.set("cursor", cursor);
+      const page = await envelope<Array<{ key: string }>>(await fetchImpl(`${objects}?${query}`, { headers }), `list ${bucketName}/${prefix}`);
+      const truncated = page.result_info?.is_truncated === true;
+      return { objects: page.result.map((o) => ({ key: o.key })), truncated, cursor: truncated ? page.result_info?.cursor : undefined };
+    },
+    get: async (key) => {
+      const res = await object(key);
+      return res && { text: () => res.text() };
+    },
+    stream: async (key) => {
+      const res = await object(key);
+      return res && res.body;
+    },
+    put: readOnly,
+    delete: readOnly,
+    createMultipartUpload: readOnly,
   };
 }

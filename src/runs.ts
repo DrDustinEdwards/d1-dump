@@ -60,12 +60,17 @@ export async function backupHealth(
     return { last_ok: null, age_hours: null, warning: `backup freshness unreadable: ${(err instanceof Error ? err.message : String(err)).slice(0, 80)}` };
   }
   if (!latest) return { last_ok: null, age_hours: null, warning: "no complete dump found" };
-  const stamped = Date.parse(latest.exported_at);
-  if (Number.isNaN(stamped)) return { last_ok: latest.exported_at, age_hours: null, warning: `the newest dump's time is not parseable: ${String(latest.exported_at).slice(0, 40)}` };
-  const ageMs = (options.now ?? new Date()).getTime() - stamped;
+  return ageOf(latest.exported_at, options.now ?? new Date(), staleHours, "dump");
+}
+
+// The BackupHealth of a stamped time: its age, and a warning past staleHours or when it is not a time.
+export function ageOf(stamp: string, now: Date, staleHours: number, what: string): BackupHealth {
+  const stamped = Date.parse(stamp);
+  if (Number.isNaN(stamped)) return { last_ok: stamp, age_hours: null, warning: `the newest ${what}'s time is not parseable: ${String(stamp).slice(0, 40)}` };
+  const ageMs = now.getTime() - stamped;
   const ageHours = Math.round((ageMs / 3_600_000) * 10) / 10;
-  const result: BackupHealth = { last_ok: latest.exported_at, age_hours: ageHours };
-  if (ageMs > staleHours * 3_600_000) result.warning = `last complete dump was ${ageHours}h ago, over the ${staleHours}h threshold`;
+  const result: BackupHealth = { last_ok: stamp, age_hours: ageHours };
+  if (ageMs > staleHours * 3_600_000) result.warning = `last complete ${what} was ${ageHours}h ago, over the ${staleHours}h threshold`;
   return result;
 }
 
@@ -82,7 +87,7 @@ export interface PruneResult {
 // ObjectLockedByBucketPolicy (developers.cloudflare.com/r2/api/error-codes/). The Workers
 // binding throws an R2Error carrying it as `code` and at the end of its message.
 const R2_OBJECT_LOCKED = 10069;
-function isLockRefusal(err: unknown): boolean {
+export function isLockRefusal(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   if ((err as { code?: unknown }).code === R2_OBJECT_LOCKED) return true;
   const message = (err as { message?: unknown }).message;

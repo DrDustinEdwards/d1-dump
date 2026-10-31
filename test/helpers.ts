@@ -1,18 +1,19 @@
 import { Miniflare } from "miniflare";
-import type { D1Like, DrillResult, R2Like } from "../src/index.js";
+import type { D1Like, DrillResult, R2FilesLike, R2Like } from "../src/index.js";
 
 // Real D1 (SQLite with FTS5) and R2, in-process, as workerd runs them.
-export async function sandbox(): Promise<{ src: D1Like; dst: D1Like; bucket: R2Like; dispose: () => Promise<void> }> {
+export async function sandbox(): Promise<{ src: D1Like; dst: D1Like; bucket: R2Like; media: R2FilesLike; dispose: () => Promise<void> }> {
   const mf = new Miniflare({
     modules: true,
     script: "export default { fetch() { return new Response('ok') } }",
     d1Databases: ["SRC", "DST"],
-    r2Buckets: ["BUCKET"],
+    r2Buckets: ["BUCKET", "MEDIA"],
   });
   const src = (await mf.getD1Database("SRC")) as unknown as D1Like;
   const dst = (await mf.getD1Database("DST")) as unknown as D1Like;
   const bucket = (await mf.getR2Bucket("BUCKET")) as unknown as R2Like;
-  return { src, dst, bucket, dispose: () => mf.dispose() };
+  const media = (await mf.getR2Bucket("MEDIA")) as unknown as R2FilesLike;
+  return { src, dst, bucket, media, dispose: () => mf.dispose() };
 }
 
 export async function exec(db: D1Like, statements: string[]): Promise<void> {

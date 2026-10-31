@@ -1,9 +1,15 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
+import { createWriteStream, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative, sep } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { SCRATCH_PREFIX, type Scratch } from "./drill.js";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+import { cloudflareBucket, cloudflareScratch, type RestBucket } from "./cloudflare.js";
+import { COMPLETE_MARKER, DEFAULT_PREFIX, type CompleteMarker } from "./dump.js";
+import { SCRATCH_PREFIX, runRestoreDrill, type Scratch } from "./drill.js";
+import { latestDump } from "./runs.js";
 import type { D1Like, D1Statement, R2Like } from "./types.js";
 
 // A downloaded dump as an R2Like, read only, for a drill run from Node. `root` holds the
@@ -101,4 +107,73 @@ export function sqliteScratch(): (name: string) => Promise<Scratch> {
       },
     };
   };
+}
+
+// Downloads the newest complete run under `prefix`, and only that run, into `root` as the
+// keys' paths, for a drill through directoryBucket(root). Its objects are the ones its marker
+// lists, then the marker. A listed object that is missing is left out, so the drill's own
+// checks fail on it. null when the bucket holds no complete run.
+export async function downloadLatestRun(bucket: RestBucket, root: string, prefix: string = DEFAULT_PREFIX): Promise<{ prefix: string; objects: number } | null> {
+  const latest = await latestDump(bucket, { prefix });
+  if (!latest) return null;
+  const markerKey = `${latest.prefix}${COMPLETE_MARKER}`;
+  const marker = JSON.parse((await (await bucket.get(markerKey))?.text()) ?? "{}") as Partial<CompleteMarker>;
+  let objects = 0;
+  for (const key of [...(marker.keys ?? []).filter((k) => k !== markerKey), markerKey]) {
+    if (!key.startsWith(latest.prefix) || key.split("/").includes("..")) throw new Error(`d1-dump: ${markerKey} lists ${key}, outside its run`);
+    const body = await bucket.stream(key);
+    if (!body) continue;
+    const path = join(root, ...key.split("/"));
+    await mkdir(dirname(path), { recursive: true });
+    await pipeline(Readable.fromWeb(body as NodeReadableStream<Uint8Array>), createWriteStream(path));
+    objects++;
+  }
+  return { prefix: latest.prefix, objects };
+}
+
+export interface BucketDrillOptions {
+  accountId: string | undefined;
+  apiToken: string | undefined;
+  bucket: string;
+  // Where the runs are in the bucket. Defaults to backups/json/.
+  prefix?: string;
+  // sqlite unless d1 is asked for: the R2 credentials this needs do not ask for a D1 drill.
+  backend?: string;
+  maxAgeHours?: number | null;
+  fetchImpl?: typeof fetch;
+}
+
+// The weekly drill in one call: the newest complete run downloaded from the bucket over the
+// R2 REST API into a temporary directory, drilled, and the directory removed. code is 0 when
+// every check passes, 1 when one fails, and 3 when the drill could not run (no credentials,
+// an API error); the first line says which. The token is sent only as the Authorization
+// header and is never in a line.
+export async function drillFromBucket(options: BucketDrillOptions): Promise<{ code: 0 | 1 | 3; lines: string[] }> {
+  const { accountId, apiToken } = options;
+  const backend = options.backend ?? "sqlite";
+  const cannot = (why: string) => ({ code: 3 as const, lines: [`restore drill could not run: ${why}`] });
+  if (backend !== "sqlite" && backend !== "d1") return cannot(`--backend is sqlite or d1, not ${JSON.stringify(backend)}`);
+  if (!accountId || !apiToken) return cannot("--bucket needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment");
+  const root = mkdtempSync(join(tmpdir(), "d1-dump-bucket-"));
+  try {
+    const bucket = cloudflareBucket(accountId, apiToken, options.bucket, options.fetchImpl);
+    const downloaded = await downloadLatestRun(bucket, root, options.prefix);
+    const result = await runRestoreDrill(directoryBucket(root), {
+      createScratch: backend === "d1" ? cloudflareScratch(accountId, apiToken, options.fetchImpl) : sqliteScratch(),
+      prefix: downloaded?.prefix,
+      maxAgeHours: options.maxAgeHours,
+    });
+    return {
+      code: result.ok ? 0 : 1,
+      lines: [
+        `restore drill ${result.ok ? "PASSED" : "FAILED"}: ${result.run ?? "no dump"} into ${result.scratch} (${backend})`,
+        `downloaded ${downloaded ? `${downloaded.objects} objects of ${downloaded.prefix}` : "nothing: no complete run"} from ${options.bucket}`,
+        ...result.checks.map((c) => `  ${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`),
+      ],
+    };
+  } catch (err) {
+    return cannot(err instanceof Error ? err.message : String(err));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }
