@@ -9,7 +9,7 @@ Each site installs it. D1 Time Travel already restores any minute of the last 30
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.7.0
+npm install github:DrDustinEdwards/d1-dump#v0.8.0
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -92,8 +92,12 @@ await runCheckedBackup(env.DB, env.BACKUPS, {
   required: ["posts", "journal"],  // what exists nowhere else
   counted: ["posts"],              // required too, and its dumped rows must equal a live count
   check: (dump) => [],             // the site's own checks, one message per failure
+  excludeIfPresent: ["account"],   // excluded while it exists; a migration may already have dropped it
+  credentials: { allow: { "posts.token_count": "a count, not a token" } }, // or true
 });
 ```
+
+`excludeIfPresent` is for a credential table a migration is dropping: it is excluded when it exists and skipped when it does not, so the run passes whether the deploy or the migration lands first (a name in `exclude` that is not a table fails the run). `credentials` refuses a dump that carries a column whose name says it holds a credential (`CREDENTIAL_COLUMN`: password, secret, token, API or private key, or a refresh token's or one-time code's hash; `pattern` replaces it): exclude the table, rename the column, or list it in `allow` as `"table.column"` with the reason it is safe. It is off unless set, so a release never leaves a site's nightly run incomplete on its own. `credentialProblems` and `columnNames` are the same check on their own.
 
 The standard checks refuse an empty dump, an excluded table in the dump and a missing required one. Each `counted` table is counted again straight after the dump and must match what was dumped, and the run is refused if every counted table dumped empty, since an emptied database matches its own counts. Count only tables the operator writes: a reader's write between the dump and the count fails the night. A failed check throws `BackupIncomplete` (with `dump` and `problems`), leaves the run without its marker and prunes nothing, so the scheduled run fails and the health age keeps growing. `standardProblems` is the same checks on their own. For a different order, call the pieces yourself:
 
@@ -146,7 +150,7 @@ Seven checks run, and each reports what it read, so "ok" cannot mean "read nothi
 | `restore` | `restoreDump` throws, which includes its own count check against the marker |
 | `counts` | a table, counted again after the restore, differs from the marker, or the copy holds no rows |
 | `fts` | an external FTS5 index holds fewer documents than its content table (counted through `_docsize`, because `COUNT(*)` on an external-content FTS5 table reads through to the content table and cannot disagree), or an internal one fewer than the dump held |
-| `search` | a word taken from a restored row is not found through the index, or no FTS5 table held a word to search for |
+| `search` | a word taken from a restored row is not found through the index, or the database has FTS5 tables but none held a word to search for (a database with no FTS5 table passes and says so) |
 | `statements` | any statement sent was over D1's 100,000 byte cap, or none was sent |
 | `scratch` | the scratch database was not deleted; the detail names it |
 

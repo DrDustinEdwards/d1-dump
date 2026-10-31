@@ -120,6 +120,21 @@ test("a dropped FTS5 rebuild fails the fts and search checks, though every table
   expect(result.ok).toBe(false);
 });
 
+// foxhound's drill, 2026-10-31: a database with no FTS5 table failed "search" though every
+// table restored, so a backup that restores could never pass.
+test("a database with no FTS5 table passes search and says why", async () => {
+  const plain = await sandbox();
+  try {
+    await exec(plain.src, ["CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)", "INSERT INTO notes (body) VALUES ('sample text')"]);
+    await dumpDatabase(plain.src, plain.bucket, { now: NOW });
+    const result = await runRestoreDrill(plain.bucket, { ...scratchOf(plain.dst), now: LATER });
+    expect(checkOf(result, "search")).toMatchObject({ ok: true, detail: expect.stringMatching(/no FTS5 tables/) });
+    expect(result.ok).toBe(true);
+  } finally {
+    await plain.dispose();
+  }
+});
+
 test("a stale dump fails the drill, and maxAgeHours: null turns the check off", async () => {
   await dumpDatabase(src, bucket, { now: NOW });
   const late = new Date("2026-09-29T09:00:00.000Z");
