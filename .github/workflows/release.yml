@@ -20,11 +20,11 @@ jobs:
   release:
     permissions:
       contents: write
-    uses: DrDustinEdwards/devkit/.github/workflows/release.yml@e7ecda8f69c8bbde738edcd1cf510710e547bcf3 # v0.20.22
+    uses: DrDustinEdwards/devkit/.github/workflows/release.yml@8390c62de180aa316f12d141a0cc42d00a714f74 # v0.20.23
 
   bump:
     needs: release
     if: needs.release.outputs.created == 'true'
-    uses: DrDustinEdwards/devkit/.github/workflows/bump-consumers.yml@e7ecda8f69c8bbde738edcd1cf510710e547bcf3 # v0.20.22
+    uses: DrDustinEdwards/devkit/.github/workflows/bump-consumers.yml@8390c62de180aa316f12d141a0cc42d00a714f74 # v0.20.23
     secrets:
       token: ${{ secrets.RENOVATE_TRIGGER_TOKEN }}
