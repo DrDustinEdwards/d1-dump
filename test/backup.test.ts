@@ -1,3 +1,4 @@
+import { resetDb } from "@dustinedwards/devkit/d1";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import {
   BackupIncomplete,
@@ -47,7 +48,8 @@ test("a missing required table leaves the run without its marker and throws", as
 });
 
 test("an emptied database is refused, though it dumps cleanly", async () => {
-  await exec(src, ["DELETE FROM comments", "DELETE FROM posts", "DELETE FROM glossary", "DELETE FROM settings"]);
+  // hits is contentless FTS5, which refuses DELETE; a database emptied of everything else is still refused.
+  await resetDb(src, { keep: ["hits"] });
   const err = (await runCheckedBackup(src, bucket, { now: NOW }).catch((e: unknown) => e)) as BackupIncomplete;
   expect(err.problems).toEqual([expect.stringMatching(/ and 0 rows$/)]);
 });
