@@ -1,0 +1,21 @@
+name: no-bloat
+
+# Knip, jscpd and the test count against the committed baseline in .no-bloat.json (devkit's no-bloat ratchet, checklist
+# E1). A count above its baseline fails; `npm run bloat` runs the same check locally, and `npx devkit-no-bloat
+# --write-baseline` records a new baseline in the change that moves it.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: no-bloat-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  no-bloat:
+    uses: DrDustinEdwards/devkit/.github/workflows/no-bloat.yml@454002f526e5e8e645a9c110605880e220b611a0 # v0.21.0
