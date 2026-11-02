@@ -1,3 +1,4 @@
+import { GZIP_TYPE, gzipText } from "./gzip.js";
 import { JSON_TYPE, putJsonStreamed } from "./r2.js";
 import { quoteIdent, readPlan, type FtsTable, type SchemaEntry } from "./schema.js";
 import type { D1Like, R2Like } from "./types.js";
@@ -17,7 +18,7 @@ export interface PagedTable {
 }
 
 export interface DumpOptions {
-  // Where runs are written: <prefix><run id>/<table>.json. Defaults to backups/json/.
+  // Where runs are written: <prefix><run id>/<table>.json (.json.gz with compress). Defaults to backups/json/.
   prefix?: string;
   now?: Date;
   // Tables too large to hold in the isolate at once. Every other table is read whole.
@@ -31,6 +32,10 @@ export interface DumpOptions {
   // and then call writeCompleteMarker, or leave the run incomplete when a check fails.
   // Defaults to true.
   markComplete?: boolean;
+  // Write each table as <table>.json.gz, the same JSON gzipped, which is several times smaller.
+  // Restore and the drill read both, so a bucket may hold runs of either kind. _schema.json, the
+  // sidecars and the marker stay plain. Off unless set.
+  compress?: boolean;
 }
 
 export interface DumpedTable {
@@ -98,6 +103,7 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
   const plan = await readPlan(db);
   const paged = options.paged ?? {};
   const exclude = options.exclude ?? [];
+  const compress = options.compress ?? false;
 
   const internalFts = plan.fts.filter((f) => f.mode === "internal").map((f) => f.name);
   const known = new Set([...plan.tables, ...internalFts]);
@@ -127,7 +133,7 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
   const tables: DumpedTable[] = [];
   for (let i = 0; i < targets.length; i++) {
     const table = targets[i];
-    const key = `${runPrefix}${table}.json`;
+    const key = `${runPrefix}${table}.json${compress ? ".gz" : ""}`;
     const results = snapshot[i]?.results ?? [];
     const p = paged[table];
     let rows: number;
@@ -136,13 +142,15 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
       const maxId = Number(first?.max_id ?? Number.NaN);
       const head = `{"exported_at":${JSON.stringify(exportedAt)},"table":${JSON.stringify(table)},"rows":[`;
       rows = Number.isNaN(maxId)
-        ? await putJsonStreamed(bucket, key, head, (async function* () {})())
-        : await putJsonStreamed(bucket, key, head, pages(db, table, p.idColumn, maxId, p.pageRows));
+        ? await putJsonStreamed(bucket, key, head, (async function* () {})(), compress)
+        : await putJsonStreamed(bucket, key, head, pages(db, table, p.idColumn, maxId, p.pageRows), compress);
       // Fewer rows than the snapshot held means a repeated id was skipped or rows went away mid-dump: not a backup.
       const expected = Number(first?.n ?? 0);
       if (rows !== expected) throw new Error(`d1-dump: ${table} paged ${rows} rows but held ${expected} when the dump began`);
     } else {
-      await bucket.put(key, JSON.stringify({ exported_at: exportedAt, table, rows: results }), JSON_TYPE);
+      const body = JSON.stringify({ exported_at: exportedAt, table, rows: results });
+      if (compress) await bucket.put(key, await gzipText(body), GZIP_TYPE);
+      else await bucket.put(key, body, JSON_TYPE);
       rows = results.length;
     }
     keys.push(key);

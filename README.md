@@ -9,7 +9,7 @@ Each site installs it. D1 Time Travel already restores any minute of the last 30
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.9.0
+npm install github:DrDustinEdwards/d1-dump#v0.10.0
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -31,7 +31,8 @@ Each run writes `backups/json/<run id>/<table>.json` (`{exported_at, table, rows
 
 - **FTS5.** Shadow tables are never dumped. An external-content FTS5 table (`content='posts'`) is rebuilt from its content table on restore. An internal-content one is dumped through its columns with its rowid. A contentless one (`content=''`) holds no text, so it is restored empty and reported. Any other virtual table fails the run.
 - **One instant.** Every table is read in one D1 batch, which is one transaction. A table too large to hold in memory can be named in `paged` if it is append-only with a growing integer id. Its rows up to the snapshot's `MAX(id)` are then read in pages and streamed to R2 as a multipart object, and the dump fails, writing no marker, unless the pages held exactly the row count the snapshot saw (a repeated id or a delete mid-dump would lose rows).
-- **Options.** `prefix`, `paged`, `exclude` (a name that is not a table fails the run), and `sidecars` (extra `_<name>.json` objects written before the marker).
+- **Options.** `prefix`, `paged`, `exclude` (a name that is not a table fails the run), `sidecars` (extra `_<name>.json` objects written before the marker), and `compress`.
+- **Compression.** With `compress: true` each table is written as `<table>.json.gz`, the same JSON gzipped (several times smaller; a paged table is compressed as it streams). `_schema.json`, the sidecars and `_complete.json` stay plain, and the marker lists the `.gz` keys. `restoreDump`, the drill and `downloadLatestRun` read both kinds, so a bucket can hold plain and compressed runs while the old ones age out. A bucket object read through `get` needs `arrayBuffer()` to read a `.gz` key (an R2 binding has it). To restore by hand, `gunzip` the table files.
 - **BLOBs** are written as D1 returns them, an array of byte values, which D1 stores back as a BLOB. Integers beyond 2^53 lose precision, as they do everywhere in D1's JavaScript API.
 
 ## Report its age

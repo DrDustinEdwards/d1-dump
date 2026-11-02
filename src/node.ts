@@ -32,11 +32,13 @@ export function directoryBucket(root: string): R2Like {
     get: async (key) => {
       const path = join(root, ...key.split("/"));
       if (relative(root, path).startsWith("..")) throw new Error(`d1-dump: ${key} is outside ${root}`);
-      const text = await readFile(path, "utf8").catch((err: NodeJS.ErrnoException) => {
+      const bytes = await readFile(path).catch((err: NodeJS.ErrnoException) => {
         if (err.code === "ENOENT") return null;
         throw err;
       });
-      return text === null ? null : { text: async () => text };
+      if (bytes === null) return null;
+      const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      return { text: async () => bytes.toString("utf8"), arrayBuffer: async () => copy };
     },
     list: async ({ prefix = "" }) => ({ objects: (await keysUnder(root)).filter((k) => k.startsWith(prefix)).sort().map((key) => ({ key })), truncated: false }),
     put: readOnly,

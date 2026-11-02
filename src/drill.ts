@@ -1,4 +1,5 @@
 import { COMPLETE_MARKER, SCHEMA_SIDECAR, type CompleteMarker, type SchemaSidecar } from "./dump.js";
+import { readDumpJson } from "./gzip.js";
 import { restoreDump, type RestoreOptions, type RestoreResult } from "./restore.js";
 import { DEFAULT_STALE_HOURS, latestDump } from "./runs.js";
 import { quoteIdent } from "./schema.js";
@@ -103,10 +104,8 @@ export function scratchName(now: Date, pid: number): string {
   return `${SCRATCH_PREFIX}${now.toISOString().slice(0, 10)}-${pid}`;
 }
 
-async function readJson<T>(bucket: R2Like, key: string): Promise<T> {
-  const obj = await bucket.get(key);
-  if (!obj) throw new Error(`${key} is missing`);
-  return JSON.parse(await obj.text()) as T;
+function readJson<T>(bucket: R2Like, key: string): Promise<T> {
+  return readDumpJson<T>(bucket, key, (k) => `${k} is missing`);
 }
 
 async function count(db: D1Like, table: string): Promise<number> {

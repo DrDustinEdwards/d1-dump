@@ -68,6 +68,33 @@ test("a large append-only table is paged and streamed as a multipart object, and
   expect(await rows(dst, "SELECT MIN(id) AS lo, MAX(id) AS hi, SUM(length(detail)) AS bytes FROM audit")).toEqual([{ lo: 1, hi: 6, bytes: 9_600_000 }]);
 });
 
+// compress writes each table as gzip under a .gz key, whole tables and streamed ones alike, and
+// the same restore reads it. The rows are random digits so the archive is not trivially small.
+test("a compressed dump is smaller, restores row for row, and sits beside a plain run", { timeout: 180_000 }, async () => {
+  await exec(src, ["CREATE TABLE audit (id INTEGER PRIMARY KEY AUTOINCREMENT, detail TEXT)"]);
+  for (let i = 0; i < 40; i++) await src.prepare("INSERT INTO audit (detail) VALUES (?1)").bind(`row ${i} ` + "0123456789".repeat(2000)).run();
+  const paged = { audit: { idColumn: "id", pageRows: 7 } };
+  const plain = await dumpDatabase(src, bucket, { now: NOW, paged });
+  const packed = await dumpDatabase(src, bucket, { now: new Date("2026-09-28T09:00:00.000Z"), paged, compress: true });
+
+  expect(packed.tables.every((t) => t.key.endsWith(`/${t.name}.json.gz`))).toBe(true);
+  expect(plain.tables.every((t) => t.key.endsWith(`/${t.name}.json`))).toBe(true);
+  const size = async (key: string) => (await (await bucket.get(key))!.arrayBuffer!()).byteLength;
+  const auditKey = (r: typeof plain) => r.tables.find((t) => t.name === "audit")!.key;
+  expect(await size(auditKey(packed))).toBeLessThan((await size(auditKey(plain))) / 4);
+  // Gzip bytes, not JSON text, are what the object holds.
+  expect(new Uint8Array(await (await bucket.get(auditKey(packed)))!.arrayBuffer!()).slice(0, 2)).toEqual(new Uint8Array([0x1f, 0x8b]));
+
+  const restored = await restoreDump(dst, bucket, packed.prefix);
+  expect(restored.rebuilt).toEqual(["posts_fts"]);
+  for (const sql of ["SELECT id, slug, body, hex(cover) AS cover FROM posts ORDER BY id", "SELECT * FROM comments ORDER BY id", "SELECT * FROM audit ORDER BY id"]) {
+    expect(await rows(dst, sql)).toEqual(await rows(src, sql));
+  }
+  // The plain run still restores with the same code.
+  const dst2 = (await sandbox()).dst;
+  expect((await restoreDump(dst2, bucket, plain.prefix)).tables.find((t) => t.name === "audit")?.rows).toBe(40);
+});
+
 test("a failed write leaves no marker, so the run is not a complete dump", async () => {
   let puts = 0;
   const failing: R2Like = {
