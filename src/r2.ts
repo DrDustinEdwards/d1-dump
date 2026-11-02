@@ -1,3 +1,4 @@
+import { GZIP_TYPE } from "./gzip.js";
 import type { R2Like, R2UploadedPartLike } from "./types.js";
 
 // R2 requires every part except the last to be the same size, and at least 5 MiB.
@@ -9,9 +10,10 @@ export const JSON_TYPE = { httpMetadata: { contentType: "application/json" } };
 
 // Writes `head`, then the rows a page at a time, then "]}", as one multipart object.
 // The bytes equal JSON.stringify of the whole object, holding at most one part and one
-// page in memory.
-export async function putJsonStreamed(bucket: R2Like, key: string, head: string, pages: AsyncIterable<unknown[]>): Promise<number> {
-  const upload = await bucket.createMultipartUpload(key, JSON_TYPE);
+// page in memory. With `gzip` the same bytes are compressed as they stream, and the object
+// holds the gzip of them.
+export async function putJsonStreamed(bucket: R2Like, key: string, head: string, pages: AsyncIterable<unknown[]>, gzip = false): Promise<number> {
+  const upload = await bucket.createMultipartUpload(key, gzip ? GZIP_TYPE : JSON_TYPE);
   const parts: R2UploadedPartLike[] = [];
   const encoder = new TextEncoder();
   let part = new Uint8Array(MULTIPART_PART_BYTES);
@@ -22,8 +24,8 @@ export async function putJsonStreamed(bucket: R2Like, key: string, head: string,
     part = new Uint8Array(MULTIPART_PART_BYTES);
     filled = 0;
   };
-  const write = async (text: string) => {
-    let bytes = encoder.encode(text);
+  const append = async (input: Uint8Array) => {
+    let bytes = input;
     while (bytes.length > 0) {
       const n = Math.min(bytes.length, MULTIPART_PART_BYTES - filled);
       part.set(bytes.subarray(0, n), filled);
@@ -31,6 +33,25 @@ export async function putJsonStreamed(bucket: R2Like, key: string, head: string,
       bytes = bytes.subarray(n);
       if (filled === MULTIPART_PART_BYTES) await flush();
     }
+  };
+  // Text goes to the parts as UTF-8, or through a gzip stream whose output is read as it appears.
+  const gz = gzip ? new CompressionStream("gzip") : null;
+  const gzWriter = gz?.writable.getWriter();
+  const pump = gz
+    ? (async () => {
+        const reader = gz.readable.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          await append(value);
+        }
+      })()
+    : null;
+  pump?.catch(() => {});
+  const write = async (text: string) => {
+    const bytes = encoder.encode(text);
+    if (gzWriter) await gzWriter.write(bytes);
+    else await append(bytes);
   };
   try {
     await write(head);
@@ -41,10 +62,15 @@ export async function putJsonStreamed(bucket: R2Like, key: string, head: string,
       }
     }
     await write("]}");
+    if (gzWriter) {
+      await gzWriter.close();
+      await pump;
+    }
     if (filled > 0 || parts.length === 0) await flush();
     await upload.complete(parts);
     return rows;
   } catch (err) {
+    await gzWriter?.abort(err).catch(() => {});
     // The abort's own failure is reported with the cause, never in place of it.
     await upload.abort().catch((abortErr: unknown) => {
       throw new AggregateError([err, abortErr], `d1-dump: writing ${key} failed, and so did aborting its upload`);
