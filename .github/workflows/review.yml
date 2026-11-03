@@ -1,0 +1,23 @@
+name: review
+
+# The automatic PR reviewer (devkit review.yml): Capsid reviews each pull request and writes an advisory "review verdict"
+# check. No secret: Capsid is reached with the job's OIDC token.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions: {}
+
+# A newer push cancels the review of the older one.
+concurrency:
+  group: review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # A called workflow holds no more than this job grants.
+    permissions:
+      id-token: write
+      checks: write
+    uses: DrDustinEdwards/devkit/.github/workflows/review.yml@16575fbe0f58739e9bcdebed22ae660bde1af892
