@@ -121,7 +121,7 @@ export function cloudflareBucket(accountId: string, apiToken: string, bucketName
     },
     get: async (key) => {
       const res = await object(key);
-      return res && { text: () => res.text() };
+      return res && { text: () => res.text(), arrayBuffer: () => res.arrayBuffer() };
     },
     stream: async (key) => {
       const res = await object(key);

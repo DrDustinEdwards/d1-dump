@@ -1,4 +1,5 @@
 import { COMPLETE_MARKER, SCHEMA_SIDECAR, type CompleteMarker, type SchemaSidecar } from "./dump.js";
+import { readDumpJson } from "./gzip.js";
 import { quoteIdent } from "./schema.js";
 import type { D1Like, D1Statement, R2Like } from "./types.js";
 
@@ -30,10 +31,8 @@ function boundSize(v: unknown): number {
   return typeof v === "string" || Array.isArray(v) ? v.length : 8;
 }
 
-async function readJson<T>(bucket: R2Like, key: string): Promise<T> {
-  const obj = await bucket.get(key);
-  if (!obj) throw new Error(`d1-dump: ${key} is missing from the dump`);
-  return JSON.parse(await obj.text()) as T;
+function readJson<T>(bucket: R2Like, key: string): Promise<T> {
+  return readDumpJson<T>(bucket, key, (k) => `d1-dump: ${k} is missing from the dump`);
 }
 
 // The columns the restored table has, from the CREATE statement in _schema.json that was

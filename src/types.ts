@@ -25,8 +25,9 @@ export interface R2MultipartLike {
 }
 
 export interface R2Like {
-  put(key: string, value: string, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
-  get(key: string): Promise<{ text(): Promise<string> } | null>;
+  put(key: string, value: string | Uint8Array, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+  // arrayBuffer is what a gzip object (a dump written with `compress`) is read through.
+  get(key: string): Promise<{ text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer> } | null>;
   list(options: { prefix?: string; cursor?: string }): Promise<{ objects: Array<{ key: string }>; truncated: boolean; cursor?: string }>;
   delete(keys: string | string[]): Promise<void>;
   createMultipartUpload(key: string, options?: { httpMetadata?: { contentType?: string } }): Promise<R2MultipartLike>;
