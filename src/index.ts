@@ -1,6 +1,7 @@
 export {
   COMPLETE_MARKER,
   DEFAULT_PREFIX,
+  LATEST_POINTER,
   SCHEMA_SIDECAR,
   dumpDatabase,
   runIdFor,
@@ -9,6 +10,7 @@ export {
   type DumpOptions,
   type DumpResult,
   type DumpedTable,
+  type LatestPointer,
   type PagedTable,
   type SchemaSidecar,
 } from "./dump.js";

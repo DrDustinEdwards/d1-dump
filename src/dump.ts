@@ -8,6 +8,16 @@ export const DEFAULT_PREFIX = "backups/json/";
 // it is incomplete: latestDump skips it and pruneDumps gives it no slot in the floor.
 export const COMPLETE_MARKER = "_complete.json";
 export const SCHEMA_SIDECAR = "_schema.json";
+// Beside the runs, at <prefix>_latest.json: the newest complete run's id, rewritten each time a
+// marker is written. latestDump reads it with one get instead of listing the bucket, so a health
+// route reads the same objects wherever it runs. R2 bills a list as a Class A operation and a get
+// as Class B (developers.cloudflare.com/r2/pricing/).
+export const LATEST_POINTER = "_latest.json";
+
+export interface LatestPointer {
+  run_id: string;
+  exported_at: string;
+}
 
 export interface PagedTable {
   // An INTEGER column that only grows (AUTOINCREMENT) on a table whose rows are never
@@ -193,7 +203,22 @@ export async function writeCompleteMarker(bucket: R2Like, result: DumpResult): P
   await bucket.put(key, JSON.stringify(marker), JSON_TYPE);
   result.keys.push(key);
   result.complete = true;
+  await advancePointer(bucket, result);
   return key;
+}
+
+// Points <prefix>_latest.json at this run, unless it already names a newer one (two runs that
+// overlapped finishing out of order). Run ids sort as their times do.
+async function advancePointer(bucket: R2Like, result: DumpResult): Promise<void> {
+  const base = result.prefix.slice(0, result.prefix.length - result.run_id.length - 1);
+  const key = `${base}${LATEST_POINTER}`;
+  const current = await bucket.get(key);
+  if (current) {
+    const named = (JSON.parse(await current.text()) as Partial<LatestPointer>).run_id;
+    if (typeof named === "string" && named > result.run_id) return;
+  }
+  const pointer: LatestPointer = { run_id: result.run_id, exported_at: result.exported_at };
+  await bucket.put(key, JSON.stringify(pointer), JSON_TYPE);
 }
 
 function sidecarsOf(options: DumpOptions): Record<string, unknown> {

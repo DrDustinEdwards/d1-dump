@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { COMPLETE_MARKER, backupHealth, latestDump, pruneDumps, runIdFor, selectStaleRuns, type R2Like } from "../src/index.js";
+import { COMPLETE_MARKER, LATEST_POINTER, backupHealth, latestDump, pruneDumps, runIdFor, selectStaleRuns, writeCompleteMarker, type DumpResult, type R2Like } from "../src/index.js";
 import { sandbox } from "./helpers.js";
 
 let bucket: R2Like;
@@ -22,7 +22,7 @@ async function runIds(): Promise<string[]> {
   return [...new Set(keys.map((k) => k.slice(P.length).split("/")[0]))].sort();
 }
 
-test("backup health reports the newest complete dump in Capsid's /health shape, and skips an incomplete newer run", async () => {
+test("backup health reports the newest complete dump in Capsid's /health shape, skips an incomplete newer run, and reads the pointer a marker write leaves", async () => {
   await run("2026-09-26T09:00:00.000Z", true);
   await run("2026-09-27T09:00:00.000Z", false);
   const now = new Date("2026-09-27T12:00:00.000Z");
@@ -35,6 +35,24 @@ test("backup health reports the newest complete dump in Capsid's /health shape, 
   const counted: R2Like = { ...bucket, list: (o) => (lists++, bucket.list(o)), get: (k) => bucket.get(k) };
   expect((await latestDump(counted))?.run_id).toBe("2026-09-26T09-00-00-000Z");
   expect(lists).toBe(1);
+  // Each marker write points _latest.json at its run, and then the newest dump is found with no list.
+  const marked = async (at: string) => {
+    const run_id = runIdFor(new Date(at));
+    const dump: DumpResult = { run_id, prefix: `${P}${run_id}/`, exported_at: at, keys: [], tables: [], fts: [], excluded: [], shadow_skipped: [], complete: false };
+    await writeCompleteMarker(bucket, dump);
+    return run_id;
+  };
+  lists = 0;
+  const newer = await marked("2026-09-28T09:00:00.000Z");
+  // A run that finishes after a newer one leaves the pointer on the newer.
+  await marked("2026-09-25T09:00:00.000Z");
+  expect(await backupHealth(counted, { now: new Date("2026-09-28T12:00:00.000Z") })).toEqual({ last_ok: "2026-09-28T09:00:00.000Z", age_hours: 3 });
+  expect(lists).toBe(0);
+  // A pointer whose run lost its marker is not trusted: the listing finds the newest complete run.
+  await bucket.delete(`${P}${newer}/${COMPLETE_MARKER}`);
+  expect((await latestDump(counted))?.run_id).toBe("2026-09-26T09-00-00-000Z");
+  expect(lists).toBe(1);
+  expect((await bucket.list({ prefix: P, delimiter: "/" })).objects.map((o) => o.key)).toEqual([`${P}${LATEST_POINTER}`]);
 });
 
 test("backup health with no complete dump is a warning, not a missing field", async () => {
@@ -44,7 +62,8 @@ test("backup health with no complete dump is a warning, not a missing field", as
 });
 
 test("backup health that cannot read the bucket says so rather than throwing", async () => {
-  const broken = { ...bucket, list: async () => { throw new Error("bucket unbound"); } } as R2Like;
+  const unbound = async () => { throw new Error("bucket unbound"); };
+  const broken = { ...bucket, list: unbound, get: unbound } as unknown as R2Like;
   expect(await backupHealth(broken)).toEqual({ last_ok: null, age_hours: null, warning: "backup freshness unreadable: bucket unbound" });
 });
 

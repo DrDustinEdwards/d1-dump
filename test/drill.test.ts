@@ -193,7 +193,7 @@ async function download(): Promise<string> {
 test("a downloaded directory is a read-only bucket the drill runs from", async () => {
   const dumped = await dumpDatabase(src, bucket, { now: NOW });
   const dir = directoryBucket(await download());
-  expect((await dir.list({ prefix: "backups/json/" })).objects.map((o) => o.key).sort()).toEqual([...dumped.keys].sort());
+  expect((await dir.list({ prefix: "backups/json/" })).objects.map((o) => o.key).sort()).toEqual([...dumped.keys, "backups/json/_latest.json"].sort());
   expect(await dir.get("backups/json/none/_complete.json")).toBeNull();
   await expect(dir.get("../outside.json")).rejects.toThrow(/outside/);
   await expect(dir.put("k", "v")).rejects.toThrow(/read only/);

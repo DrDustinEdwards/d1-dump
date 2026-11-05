@@ -1,4 +1,4 @@
-import { COMPLETE_MARKER, DEFAULT_PREFIX, type CompleteMarker } from "./dump.js";
+import { COMPLETE_MARKER, DEFAULT_PREFIX, LATEST_POINTER, type CompleteMarker, type LatestPointer } from "./dump.js";
 import { deleteInChunks, listAllKeys } from "./r2.js";
 import type { R2Like } from "./types.js";
 
@@ -45,9 +45,31 @@ async function runIdsOf(bucket: R2Like, prefix: string): Promise<string[] | null
   return ids.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
 }
 
-// The newest complete dump, or null when there is none.
+// The run the pointer names, when it names one whose marker is still there. Null sends the
+// caller to the listing: a bucket whose runs predate the pointer, a pointer pruned or written by
+// hand, or one that is not JSON.
+async function pointedDump(bucket: R2Like, prefix: string): Promise<LatestDump | null> {
+  const obj = await bucket.get(`${prefix}${LATEST_POINTER}`);
+  if (!obj) return null;
+  let id: unknown;
+  try {
+    id = (JSON.parse(await obj.text()) as Partial<LatestPointer>).run_id;
+  } catch {
+    return null;
+  }
+  if (typeof id !== "string" || !id || id.includes("/")) return null;
+  const marker = await bucket.get(`${prefix}${id}/${COMPLETE_MARKER}`);
+  if (!marker) return null;
+  return { run_id: id, prefix: `${prefix}${id}/`, exported_at: (JSON.parse(await marker.text()) as CompleteMarker).exported_at };
+}
+
+// The newest complete dump, or null when there is none. Read from the pointer each marker
+// write leaves (two gets, no list); the bucket is listed only when the pointer is missing or
+// names a run that is no longer complete.
 export async function latestDump(bucket: R2Like, options: { prefix?: string } = {}): Promise<LatestDump | null> {
   const prefix = options.prefix ?? DEFAULT_PREFIX;
+  const pointed = await pointedDump(bucket, prefix);
+  if (pointed) return pointed;
   const ids = (await runIdsOf(bucket, prefix)) ?? (await runsOf(bucket, prefix)).map((r) => r.id);
   for (const id of ids) {
     const obj = await bucket.get(`${prefix}${id}/${COMPLETE_MARKER}`);
