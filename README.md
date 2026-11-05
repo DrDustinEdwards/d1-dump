@@ -58,6 +58,8 @@ await backupFiles(env.MEDIA, env.BACKUPS, { name: "media" }); // copies under fi
 const files = await filesHealth(env.BACKUPS, { name: "media" }); // in /health, beside backup
 ```
 
+`prefix` limits a backup to the source keys that start with it, so one bucket's irreplaceable part can be backed up without the rest: `backupFiles(env.MEDIA, env.BACKUPS, { name: "journal", prefix: "journal/" })`. A copy keeps the whole key (`files/journal/journal/<rest>`), and copies under `files/<name>/` outside the prefix are neither checked nor removed. Give a backup a new name when its prefix changes, since its progress and `_complete.json` belong to the old one.
+
 Each object is copied to `files/<name>/<key>` with its `httpMetadata` and `customMetadata`, its body streamed from the source's `get` to the backup's `put`, never held whole. The copy carries the source's etag in its customMetadata (`d1-dump-source-etag`), so the next pass skips an object whose etag has not changed and copies one that has. The comparison is etag to etag, so it holds for a multipart object too, whose etag is not a digest of its bytes. An object listed in the source and gone before it is read is counted in `gone`, not an error.
 
 The source is walked in key order beside the backup's copies, so a copy with no source object is found in the same walk. It is kept for `keepDeletedDays` (default 30) from the pass that first saw it gone, then removed. An object that comes back before then stops the clock.

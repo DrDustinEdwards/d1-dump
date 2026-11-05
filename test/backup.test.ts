@@ -162,6 +162,19 @@ function bytesOut(r2: R2FilesLike): R2FilesLike {
   };
 }
 
+test("a prefix backs up only the keys under it and leaves other copies alone", async () => {
+  const backup = bucket as unknown as R2FilesLike;
+  await media.put("journal/2026/11/a.jpg", "picture");
+  await media.put("reader/book/ch1.xhtml", "derived");
+  await backup.put("files/part/reader/old.xhtml", "an earlier copy");
+
+  const run = await backupFiles(bytesOut(media as unknown as R2FilesLike), backup, { name: "part", prefix: "journal/", now: NOW });
+  expect([run.complete, run.counts.objects, run.counts.copied, run.counts.kept_deleted]).toEqual([true, 1, 1, 0]);
+  expect(await (await backup.get("files/part/journal/2026/11/a.jpg"))?.text()).toBe("picture");
+  expect(await backup.get("files/part/reader/book/ch1.xhtml")).toBeNull();
+  expect(await (await backup.get("files/part/reader/old.xhtml"))?.text()).toBe("an earlier copy");
+});
+
 test("restoreFiles is a dry run by default, puts back what is missing, and overwrites a changed file only when asked", async () => {
   const backup = bytesOut(bucket as unknown as R2FilesLike);
   await media.put("a.txt", "first", { httpMetadata: { contentType: "text/plain" }, customMetadata: { alt: "a note" } });
