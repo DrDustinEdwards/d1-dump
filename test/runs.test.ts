@@ -29,6 +29,12 @@ test("backup health reports the newest complete dump in Capsid's /health shape, 
   expect(await backupHealth(bucket, { now })).toEqual({ last_ok: "2026-09-26T09:00:00.000Z", age_hours: 27, warning: "last complete dump was 27h ago, over the 26h threshold" });
   expect(await backupHealth(bucket, { now: new Date("2026-09-26T21:30:00.000Z") })).toEqual({ last_ok: "2026-09-26T09:00:00.000Z", age_hours: 12.5 });
   expect((await latestDump(bucket))?.run_id).toBe("2026-09-26T09-00-00-000Z");
+  // However many files each run holds, the runs are named by one list call.
+  for (let i = 0; i < 5; i++) await bucket.put(`${P}2026-09-26T09-00-00-000Z/t${i}.json`, "{}");
+  let lists = 0;
+  const counted: R2Like = { ...bucket, list: (o) => (lists++, bucket.list(o)), get: (k) => bucket.get(k) };
+  expect((await latestDump(counted))?.run_id).toBe("2026-09-26T09-00-00-000Z");
+  expect(lists).toBe(1);
 });
 
 test("backup health with no complete dump is a warning, not a missing field", async () => {
@@ -226,15 +232,4 @@ test("prune still throws on a delete failure that is not a lock refusal", async 
   await run("2026-01-05T09:00:00.000Z", true);
   const broken = lockedBucket(bucket, () => true, new Error("delete: Internal Error (10001)"));
   await expect(pruneDumps(broken, { now: new Date("2026-09-27T12:00:00.000Z") })).rejects.toThrow("Internal Error (10001)");
-});
-
-test("the newest complete dump is found with one list call however many files each run holds", async () => {
-  for (const day of ["25", "26", "27"]) {
-    const id = await run(`2026-09-${day}T09:00:00.000Z`, day !== "27");
-    for (let i = 0; i < 5; i++) await bucket.put(`${P}${id}/t${i}.json`, "{}");
-  }
-  let lists = 0;
-  const counted: R2Like = { ...bucket, list: (o) => (lists++, bucket.list(o)), get: (k) => bucket.get(k) };
-  expect((await latestDump(counted))?.run_id).toBe("2026-09-26T09-00-00-000Z");
-  expect(lists).toBe(1);
 });
