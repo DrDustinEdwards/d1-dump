@@ -9,7 +9,7 @@ Each site installs it. D1 Time Travel already restores any minute of the last 30
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.10.1
+npm install github:DrDustinEdwards/d1-dump#v0.11.0
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -80,6 +80,8 @@ const done = await restoreFiles(env.BACKUPS, env.MEDIA, { name: "media", prefix:
 `restoreFiles(backup, target, { name, prefix, apply, overwrite })` copies a files backup back into a bucket: `files/<name>/<key>` to `<key>`, with the `httpMetadata` and `customMetadata` it was backed up with (less `d1-dump-source-etag`), each body streamed. **It is a dry run unless `apply` is true**: nothing is written, and the result says what would be. `prefix` limits it to keys that start with it, as the source named them (`""`, the default, is the whole backup).
 
 Each copy is compared with the target, which is listed once beside the backup in key order rather than read per key: a key the target lacks is `missing` and is restored; one at the copy's version is `same`; one with other bytes `differs` and is left alone unless `overwrite` is set, so a restore into the live bucket puts back only what was lost. The result has the counts (`objects`, `missing`, `same`, `differs`, `written`) and the first 100 keys of each list (`restore`, `differ`). Like `backupFiles`, a run stops at `maxObjects` writes or `timeBudgetMs` and returns `complete: false` with `after`; pass it back as `after` to go on. The backup holds the newest version of each file and keeps a deleted one for `keepDeletedDays` (30) after the pass that first saw it gone, so a file deleted longer ago than that, or an older version of one since replaced, is not in it.
+
+**The files drill.** `npx d1-dump drill-files --bucket <backups bucket> [--name <files backup>]... [--sample 5]` proves a files backup restores: for each files backup in the bucket (every `files/<name>/`, unless named), it downloads a sample of copies spread evenly over its keys through the R2 REST API, restores them with `restoreFiles` (`apply: true`) into a scratch directory, never a bucket, and checks each restored file against its copy: the same length and SHA-256, and the MD5 the API's etag names when it is a single-part etag. A backup with no `_complete.json` yet is drilled with a note. It needs only R2 read (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`) and exits 0 passed, 1 a check failed or a named backup holds no copy, 3 could not run; a bucket with no files backup passes with nothing to drill. devkit's `restore-drill.yml` runs it after the D1 drill.
 
 From a seat with no Worker, one file goes back with wrangler: `npx wrangler r2 object get <backups bucket>/files/<name>/<key> --file <local file> --remote`, then `npx wrangler r2 object put <bucket>/<key> --file <local file> --content-type <type> --remote`.
 

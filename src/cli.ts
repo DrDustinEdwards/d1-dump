@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { cloudflareScratch } from "./cloudflare.js";
 import { runRestoreDrill } from "./drill.js";
-import { directoryBucket, drillFromBucket, pickBackend, sqliteScratch } from "./node.js";
+import { directoryBucket, drillFilesFromBucket, drillFromBucket, pickBackend, sqliteScratch } from "./node.js";
 
 const USAGE = `usage: d1-dump drill --dir <downloaded dump root> [--backend sqlite|d1] [--prefix <backups/json/run id/>] [--max-age-hours <n|off>]
        d1-dump drill --bucket <bucket name> [--prefix <backups/json/>] [--backend sqlite|d1] [--max-age-hours <n|off>]
@@ -9,7 +9,10 @@ const USAGE = `usage: d1-dump drill --dir <downloaded dump root> [--backend sqli
           CLOUDFLARE_API_TOKEN (R2 read), then drills it; exits 0 passed, 1 a check failed, 3 could not run
   sqlite  restores into a local SQLite file and needs no credential (the default when no Cloudflare credentials are set)
   d1      restores into a scratch D1 database over the REST API; needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN
-          (create and delete D1 databases) in the environment`;
+          (create and delete D1 databases) in the environment
+       d1-dump drill-files --bucket <bucket name> [--name <files backup>]... [--sample <n>]
+  restores a sample of each files backup (files/<name>/, every one in the bucket unless named) into a scratch
+  directory with restoreFiles and checks the bytes; R2 read is enough; exits 0 passed, 1 a check failed, 3 could not run`;
 
 function arg(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -26,6 +29,13 @@ async function main(args: string[]): Promise<number> {
   const bucket = arg(args, "--bucket");
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
+  if (args[0] === "drill-files" && bucket) {
+    const names = args.flatMap((a, i) => (a === "--name" && args[i + 1] ? [args[i + 1]!] : []));
+    const sample = arg(args, "--sample");
+    const { code, lines } = await drillFilesFromBucket({ accountId, apiToken: token, bucket, names, sample: sample === undefined ? undefined : Number(sample) });
+    for (const line of lines) console.log(line);
+    return code;
+  }
   if (args[0] === "drill" && bucket && !dir) {
     const { code, lines } = await drillFromBucket({ accountId, apiToken: token, bucket, prefix: arg(args, "--prefix"), backend: arg(args, "--backend"), maxAgeHours: maxAge(args) });
     for (const line of lines) console.log(line);
