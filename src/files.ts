@@ -17,6 +17,10 @@ const DAY_MS = 86_400_000;
 export interface FilesOptions {
   // The source's name in the backup: its copies go under files/<name>/.
   name: string;
+  // Only source keys that start with this ("" for the whole bucket, the default). A copy keeps the
+  // source's whole key, files/<name>/<key>, and copies under files/<name>/ outside the prefix are
+  // neither checked nor removed. Lets one bucket's irreplaceable part be backed up without the rest.
+  prefix?: string;
   // An object gone from the source is kept this long after it is first seen gone, then removed.
   keepDeletedDays?: number;
   // Copies and removals one run may make, and how long it may take. A run that reaches
@@ -133,8 +137,9 @@ export async function backupFiles(source: R2FilesLike, backup: R2FilesLike, opti
   const reserved: string[] = [];
   let worked = 0;
 
-  const sources = listFrom(source, "", progress.after ?? undefined);
-  const copies = listFrom(backup, base, progress.after === null ? undefined : `${base}${progress.after}`);
+  const prefix = options.prefix ?? "";
+  const sources = listFrom(source, prefix, progress.after ?? undefined);
+  const copies = listFrom(backup, `${base}${prefix}`, progress.after === null ? undefined : `${base}${progress.after}`);
   let s = await sources.next();
   let b = await copies.next();
   const nextCopy = async () => {
