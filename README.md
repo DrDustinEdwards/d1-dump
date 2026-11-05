@@ -45,7 +45,7 @@ import { backupHealth } from "@dustinedwards/d1-dump";
 const backup = await backupHealth(env.BACKUPS);
 ```
 
-It warns past 26 hours by default (`staleHours`), and never throws. It lists the bucket once, grouped by run (`delimiter: "/"`), however many tables each run holds, then reads the newest runs' markers.
+It warns past 26 hours by default (`staleHours`), and never throws. It lists nothing: each marker write also points `<prefix>_latest.json` at its run, and `latestDump` reads that pointer and the marker it names, two gets. A list is a Class A operation in R2 and a get Class B, and a health route on a custom domain is read from many data centers, so the Cache API cannot hold one listing for all of them. Only when the pointer is missing (runs written before 0.13.0) or names a run whose marker is gone does it list the bucket once, grouped by run (`delimiter: "/"`), and read the newest runs' markers.
 
 ## Back up files
 
