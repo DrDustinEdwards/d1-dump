@@ -29,6 +29,12 @@ test("backup health reports the newest complete dump in Capsid's /health shape, 
   expect(await backupHealth(bucket, { now })).toEqual({ last_ok: "2026-09-26T09:00:00.000Z", age_hours: 27, warning: "last complete dump was 27h ago, over the 26h threshold" });
   expect(await backupHealth(bucket, { now: new Date("2026-09-26T21:30:00.000Z") })).toEqual({ last_ok: "2026-09-26T09:00:00.000Z", age_hours: 12.5 });
   expect((await latestDump(bucket))?.run_id).toBe("2026-09-26T09-00-00-000Z");
+  // However many files each run holds, the runs are named by one list call.
+  for (let i = 0; i < 5; i++) await bucket.put(`${P}2026-09-26T09-00-00-000Z/t${i}.json`, "{}");
+  let lists = 0;
+  const counted: R2Like = { ...bucket, list: (o) => (lists++, bucket.list(o)), get: (k) => bucket.get(k) };
+  expect((await latestDump(counted))?.run_id).toBe("2026-09-26T09-00-00-000Z");
+  expect(lists).toBe(1);
 });
 
 test("backup health with no complete dump is a warning, not a missing field", async () => {

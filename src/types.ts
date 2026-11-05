@@ -28,7 +28,9 @@ export interface R2Like {
   put(key: string, value: string | Uint8Array, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
   // arrayBuffer is what a gzip object (a dump written with `compress`) is read through.
   get(key: string): Promise<{ text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer> } | null>;
-  list(options: { prefix?: string; cursor?: string }): Promise<{ objects: Array<{ key: string }>; truncated: boolean; cursor?: string }>;
+  // `delimiter` groups the keys under each next "/" into delimitedPrefixes, so a listing can name the runs without
+  // reading every key in them. An R2 binding does this; a bucket that answers without delimitedPrefixes is listed whole.
+  list(options: { prefix?: string; cursor?: string; delimiter?: string }): Promise<{ objects: Array<{ key: string }>; truncated: boolean; cursor?: string; delimitedPrefixes?: string[] }>;
   delete(keys: string | string[]): Promise<void>;
   createMultipartUpload(key: string, options?: { httpMetadata?: { contentType?: string } }): Promise<R2MultipartLike>;
 }
