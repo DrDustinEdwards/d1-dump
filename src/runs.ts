@@ -27,14 +27,33 @@ export interface LatestDump {
   exported_at: string;
 }
 
+// The run ids under a prefix, newest first, from a listing grouped by "/" so that one page names up to 1,000 runs
+// however many table files each holds. R2 bills each list call, and listing every key took several pages a call on a
+// site with many tables, once per /health read. Null when the bucket does not group (a REST or directory bucket).
+async function runIdsOf(bucket: R2Like, prefix: string): Promise<string[] | null> {
+  const ids: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await bucket.list({ prefix, cursor, delimiter: "/" });
+    if (!page.delimitedPrefixes) return null;
+    for (const p of page.delimitedPrefixes) {
+      const id = p.slice(prefix.length).replace(/\/$/, "");
+      if (id) ids.push(id);
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return ids.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+}
+
 // The newest complete dump, or null when there is none.
 export async function latestDump(bucket: R2Like, options: { prefix?: string } = {}): Promise<LatestDump | null> {
   const prefix = options.prefix ?? DEFAULT_PREFIX;
-  for (const run of await runsOf(bucket, prefix)) {
-    const obj = await bucket.get(`${prefix}${run.id}/${COMPLETE_MARKER}`);
+  const ids = (await runIdsOf(bucket, prefix)) ?? (await runsOf(bucket, prefix)).map((r) => r.id);
+  for (const id of ids) {
+    const obj = await bucket.get(`${prefix}${id}/${COMPLETE_MARKER}`);
     if (!obj) continue;
     const marker = JSON.parse(await obj.text()) as CompleteMarker;
-    return { run_id: run.id, prefix: `${prefix}${run.id}/`, exported_at: marker.exported_at };
+    return { run_id: id, prefix: `${prefix}${id}/`, exported_at: marker.exported_at };
   }
   return null;
 }

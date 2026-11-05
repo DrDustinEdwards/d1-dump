@@ -45,7 +45,7 @@ import { backupHealth } from "@dustinedwards/d1-dump";
 const backup = await backupHealth(env.BACKUPS);
 ```
 
-It warns past 26 hours by default (`staleHours`), and never throws.
+It warns past 26 hours by default (`staleHours`), and never throws. It lists the bucket once, grouped by run (`delimiter: "/"`), however many tables each run holds, then reads the newest runs' markers.
 
 ## Back up files
 

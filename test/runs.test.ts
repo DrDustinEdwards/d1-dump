@@ -227,3 +227,14 @@ test("prune still throws on a delete failure that is not a lock refusal", async 
   const broken = lockedBucket(bucket, () => true, new Error("delete: Internal Error (10001)"));
   await expect(pruneDumps(broken, { now: new Date("2026-09-27T12:00:00.000Z") })).rejects.toThrow("Internal Error (10001)");
 });
+
+test("the newest complete dump is found with one list call however many files each run holds", async () => {
+  for (const day of ["25", "26", "27"]) {
+    const id = await run(`2026-09-${day}T09:00:00.000Z`, day !== "27");
+    for (let i = 0; i < 5; i++) await bucket.put(`${P}${id}/t${i}.json`, "{}");
+  }
+  let lists = 0;
+  const counted: R2Like = { ...bucket, list: (o) => (lists++, bucket.list(o)), get: (k) => bucket.get(k) };
+  expect((await latestDump(counted))?.run_id).toBe("2026-09-26T09-00-00-000Z");
+  expect(lists).toBe(1);
+});
