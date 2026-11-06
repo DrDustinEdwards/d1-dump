@@ -25,13 +25,16 @@
     "prepare": "npm run build",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "bloat": "devkit-no-bloat"
+    "bloat": "devkit-no-bloat",
+    "lint": "oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error"
   },
   "devDependencies": {
-    "@dustinedwards/devkit": "github:DrDustinEdwards/devkit#v0.21.5",
+    "@dustinedwards/devkit": "github:DrDustinEdwards/devkit#v0.23.0",
     "@types/node": "24.19.2",
     "@vitest/coverage-v8": "5.0.5",
     "miniflare": "4.20260730.0",
+    "oxlint": "1.92.0",
+    "oxlint-tsgolint": "7.0.2006",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
   },

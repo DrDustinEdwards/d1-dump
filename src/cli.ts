@@ -30,7 +30,10 @@ async function main(args: string[]): Promise<number> {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (args[0] === "drill-files" && bucket) {
-    const names = args.flatMap((a, i) => (a === "--name" && args[i + 1] ? [args[i + 1]!] : []));
+    const names = args.flatMap((a, i) => {
+      const next = args[i + 1];
+      return a === "--name" && next ? [next] : [];
+    });
     const sample = arg(args, "--sample");
     const { code, lines } = await drillFilesFromBucket({ accountId, apiToken: token, bucket, names, sample: sample === undefined ? undefined : Number(sample) });
     for (const line of lines) console.log(line);
@@ -50,7 +53,8 @@ async function main(args: string[]): Promise<number> {
   const { backend, why } = picked;
   console.log(`backend: ${backend} (${why})`);
   const result = await runRestoreDrill(directoryBucket(dir), {
-    createScratch: backend === "d1" ? cloudflareScratch(accountId!, token!) : sqliteScratch(),
+    // pickBackend gives d1 only when both credentials are set.
+    createScratch: backend === "d1" && accountId && token ? cloudflareScratch(accountId, token) : sqliteScratch(),
     prefix: arg(args, "--prefix"),
     maxAgeHours: maxAge(args),
   });

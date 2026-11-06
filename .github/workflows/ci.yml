@@ -1,6 +1,6 @@
 name: ci
 
-# Typecheck and every test, on each pull request and each push to main. The tests run
+# Typecheck, lint and every test, on each pull request and each push to main. The tests run
 # real D1 and R2 in Miniflare and hold no secret.
 on:
   pull_request:
@@ -29,6 +29,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Lint
+        run: npm run lint
       - run: npm test
       # The published package has no runtime dependencies today; a high in any it gains fails the build.
       - run: npm audit --omit=dev --audit-level=high

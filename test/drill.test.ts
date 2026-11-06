@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { cloudflareScratch } from "../src/cloudflare.js";
 import { directoryBucket, drillFilesFromBucket, drillFromBucket, pathInside } from "../src/node.js";
 import { D1_MAX_STATEMENT_BYTES, dumpDatabase, guardStatements, runRestoreDrill, scratchName, type D1Like, type R2FilesLike, type R2Like } from "../src/index.js";
-import { SITE_ROWS, SITE_SCHEMA, checkOf, exec, rows, sandbox } from "./helpers.js";
+import { SITE_ROWS, SITE_SCHEMA, checkOf, exec, readText, rows, sandbox, statsOf } from "./helpers.js";
 
 let src: D1Like;
 let dst: D1Like;
@@ -78,7 +78,7 @@ test("a 141 KB value with newlines and quotes restores byte for byte, and no sta
     { id: 1, body: paper },
     { id: 2, body: big },
   ]);
-  const stats = result.stats!;
+  const stats = statsOf(result);
   expect(stats.maxStatementBytes).toBeLessThan(D1_MAX_STATEMENT_BYTES);
   expect(stats.maxBoundValue).toBe(big.length);
   expect(stats.maxBoundValue).toBeGreaterThan(1_000_000);
@@ -185,7 +185,7 @@ async function download(): Promise<string> {
   for (const obj of (await bucket.list({ prefix: "backups/" })).objects) {
     const file = join(root, ...obj.key.split("/"));
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, await (await bucket.get(obj.key))!.text());
+    writeFileSync(file, await readText(bucket, obj.key));
   }
   return root;
 }
@@ -207,7 +207,7 @@ function fakeCloudflare(target: D1Like, calls: Array<{ method: string; path: str
   return (async (url: string, init: RequestInit) => {
     const path = new URL(url).pathname;
     const body = init.body === undefined ? undefined : JSON.parse(String(init.body));
-    calls.push({ method: init.method!, path, auth: new Headers(init.headers).get("authorization"), body });
+    calls.push({ method: init.method ?? "GET", path, auth: new Headers(init.headers).get("authorization"), body });
     const reply = (result: unknown, success = true, status = 200) => new Response(JSON.stringify({ success, result, errors: success ? [] : [{ message: "nope" }] }), { status });
     if (init.method === "POST" && path.endsWith("/d1/database")) return reply({ uuid: "scratch-uuid" });
     if (init.method === "DELETE") return reply({});

@@ -234,7 +234,7 @@ async function verify(db: D1Like, bucket: R2Like, marker: CompleteMarker, check:
   }
   for (const f of marker.fts) {
     if (f.mode === "contentless") continue;
-    const source = f.mode === "external" ? f.content! : f.name;
+    const source = f.mode === "external" ? f.content : f.name;
     const file = marker.tables.find((t) => t.name === source);
     if (!file || file.rows === 0) continue;
     const { results: cols } = await db.prepare(`PRAGMA table_info(${quoteIdent(f.name)})`).all<{ name: string }>();
