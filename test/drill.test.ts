@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { cloudflareScratch } from "../src/cloudflare.js";
-import { directoryBucket, drillFilesFromBucket, drillFromBucket } from "../src/node.js";
+import { directoryBucket, drillFilesFromBucket, drillFromBucket, pathInside } from "../src/node.js";
 import { D1_MAX_STATEMENT_BYTES, dumpDatabase, guardStatements, runRestoreDrill, scratchName, type D1Like, type R2FilesLike, type R2Like } from "../src/index.js";
 import { SITE_ROWS, SITE_SCHEMA, checkOf, exec, rows, sandbox } from "./helpers.js";
 
@@ -320,4 +320,11 @@ test("drill-files restores a sample of each files backup into scratch and checks
   const lied = await drillFilesFromBucket({ accountId: "acct", apiToken: "tok", bucket: "site-backups", sample: 8, fetchImpl: rest("img/3.bin") });
   expect(lied.code).toBe(1);
   expect(lied.lines.join("\n")).toMatch(/FAIL img\/3\.bin: MD5 \S+ is not the etag 0{32}/);
+});
+
+test("a stored key never reaches a path outside the folder it is written under", () => {
+  const root = join(tmpdir(), "scratch");
+  expect(pathInside(root, "files/media/a.bin")).toBe(join(root, "files", "media", "a.bin"));
+  for (const key of ["../a.bin", "files/../../a.bin", "..", "/etc/a.bin", ""]) expect(() => pathInside(root, key)).toThrow(/is outside/);
+  expect(() => pathInside(join(root, "media"), "../media-x/a.bin")).toThrow(/is outside/);
 });
