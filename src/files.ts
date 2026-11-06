@@ -76,7 +76,16 @@ export interface FilesResult {
   reserved: string[];
 }
 
-const zero = (): FilesCounts => ({ objects: 0, copied: 0, skipped: 0, gone: 0, kept_deleted: 0, removed: 0, locked: 0, reserved: 0 });
+const zero = (): FilesCounts => ({
+  objects: 0,
+  copied: 0,
+  skipped: 0,
+  gone: 0,
+  kept_deleted: 0,
+  removed: 0,
+  locked: 0,
+  reserved: 0,
+});
 
 // R2 lists keys in UTF-8 byte order, which a JavaScript string comparison does not follow
 // past the Basic Multilingual Plane.
@@ -88,10 +97,19 @@ function compareKeys(a: string, b: string): number {
   return x.length - y.length;
 }
 
-async function* listFrom(bucket: R2FilesLike, prefix: string, startAfter: string | undefined): AsyncGenerator<R2ObjectLike> {
+async function* listFrom(
+  bucket: R2FilesLike,
+  prefix: string,
+  startAfter: string | undefined,
+): AsyncGenerator<R2ObjectLike> {
   let cursor: string | undefined;
   do {
-    const page = await bucket.list({ prefix, cursor, startAfter: cursor ? undefined : startAfter, include: ["httpMetadata", "customMetadata"] });
+    const page = await bucket.list({
+      prefix,
+      cursor,
+      startAfter: cursor ? undefined : startAfter,
+      include: ["httpMetadata", "customMetadata"],
+    });
     yield* page.objects;
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
@@ -117,9 +135,16 @@ async function readProgress(backup: R2FilesLike, key: string): Promise<Progress 
 // Nothing here reads or writes the source except its list and get. A copy or removal that a
 // bucket lock refuses (R2 error 10069) is counted in `locked` and tried again next pass; any
 // other failure throws, leaving the progress of the last saved run.
-export async function backupFiles(source: R2FilesLike, backup: R2FilesLike, options: FilesOptions): Promise<FilesResult> {
+export async function backupFiles(
+  source: R2FilesLike,
+  backup: R2FilesLike,
+  options: FilesOptions,
+): Promise<FilesResult> {
   const { name } = options;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) throw new Error(`d1-dump: a files backup name is letters, digits, '.', '_' and '-', not ${JSON.stringify(name)}`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name))
+    throw new Error(
+      `d1-dump: a files backup name is letters, digits, '.', '_' and '-', not ${JSON.stringify(name)}`,
+    );
   const keepMs = (options.keepDeletedDays ?? DEFAULT_KEEP_DELETED_DAYS) * DAY_MS;
   const maxObjects = options.maxObjects ?? DEFAULT_MAX_OBJECTS;
   const deadline = Date.now() + (options.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS);
@@ -132,14 +157,24 @@ export async function backupFiles(source: R2FilesLike, backup: R2FilesLike, opti
   const progress: Progress =
     saved && saved.after !== null
       ? saved
-      : { started_at: now.toISOString(), after: null, counts: zero(), missing: saved?.missing ?? {}, seen_missing: {} };
+      : {
+          started_at: now.toISOString(),
+          after: null,
+          counts: zero(),
+          missing: saved?.missing ?? {},
+          seen_missing: {},
+        };
   const { counts } = progress;
   const reserved: string[] = [];
   let worked = 0;
 
   const prefix = options.prefix ?? "";
   const sources = listFrom(source, prefix, progress.after ?? undefined);
-  const copies = listFrom(backup, `${base}${prefix}`, progress.after === null ? undefined : `${base}${progress.after}`);
+  const copies = listFrom(
+    backup,
+    `${base}${prefix}`,
+    progress.after === null ? undefined : `${base}${progress.after}`,
+  );
   let s = await sources.next();
   let b = await copies.next();
   const nextCopy = async () => {
@@ -187,7 +222,10 @@ export async function backupFiles(source: R2FilesLike, backup: R2FilesLike, opti
       if (key === FILES_PROGRESS || key === FILES_COMPLETE) {
         counts.reserved++;
         reserved.push(key);
-      } else if (order === 0 && (b.value as R2ObjectLike).customMetadata?.[SOURCE_ETAG] === listed.etag) {
+      } else if (
+        order === 0 &&
+        (b.value as R2ObjectLike).customMetadata?.[SOURCE_ETAG] === listed.etag
+      ) {
         counts.skipped++;
       } else {
         // Read again rather than trusting the listing: what is copied is what get returns.
@@ -195,7 +233,10 @@ export async function backupFiles(source: R2FilesLike, backup: R2FilesLike, opti
         if (!obj) counts.gone++;
         else if (
           await locking(() =>
-            backup.put(`${base}${key}`, obj.body, { httpMetadata: obj.httpMetadata, customMetadata: { ...obj.customMetadata, [SOURCE_ETAG]: obj.etag } })
+            backup.put(`${base}${key}`, obj.body, {
+              httpMetadata: obj.httpMetadata,
+              customMetadata: { ...obj.customMetadata, [SOURCE_ETAG]: obj.etag },
+            }),
           )
         )
           counts.copied++;
@@ -208,25 +249,47 @@ export async function backupFiles(source: R2FilesLike, backup: R2FilesLike, opti
 
   const complete = counts.reserved === 0;
   if (complete) {
-    const finished: FilesComplete = { started_at: progress.started_at ?? now.toISOString(), finished_at: now.toISOString(), ...counts };
+    const finished: FilesComplete = {
+      started_at: progress.started_at ?? now.toISOString(),
+      finished_at: now.toISOString(),
+      ...counts,
+    };
     await backup.put(completeKey, JSON.stringify(finished), JSON_TYPE);
   }
-  const next: Progress = { started_at: null, after: null, counts: zero(), missing: progress.seen_missing, seen_missing: {} };
+  const next: Progress = {
+    started_at: null,
+    after: null,
+    counts: zero(),
+    missing: progress.seen_missing,
+    seen_missing: {},
+  };
   await backup.put(progressKey, JSON.stringify(next), JSON_TYPE);
   return { name, complete, worked, counts, reserved };
 }
 
 // The age of the newest complete files pass, in backupHealth's shape, for /health. Never throws.
-export async function filesHealth(backup: R2FilesLike, options: { name: string; now?: Date; staleHours?: number }): Promise<BackupHealth> {
+export async function filesHealth(
+  backup: R2FilesLike,
+  options: { name: string; now?: Date; staleHours?: number },
+): Promise<BackupHealth> {
   const staleHours = options.staleHours ?? DEFAULT_STALE_HOURS;
   let marker: FilesComplete | null;
   try {
     const obj = await backup.get(`${FILES_PREFIX}${options.name}/${FILES_COMPLETE}`);
     marker = obj ? (JSON.parse(await obj.text()) as FilesComplete) : null;
   } catch (err) {
-    return { last_ok: null, age_hours: null, warning: `files backup freshness unreadable: ${(err instanceof Error ? err.message : String(err)).slice(0, 80)}` };
+    return {
+      last_ok: null,
+      age_hours: null,
+      warning: `files backup freshness unreadable: ${(err instanceof Error ? err.message : String(err)).slice(0, 80)}`,
+    };
   }
-  if (!marker) return { last_ok: null, age_hours: null, warning: `no complete files pass of ${options.name} found` };
+  if (!marker)
+    return {
+      last_ok: null,
+      age_hours: null,
+      warning: `no complete files pass of ${options.name} found`,
+    };
   return ageOf(marker.finished_at, options.now ?? new Date(), staleHours, "files pass");
 }
 
@@ -280,9 +343,16 @@ const LISTED = 100;
 // live bucket only puts back what is missing. The target is walked beside the copies in key
 // order, so it is listed once rather than read per key. Like backupFiles, a run stops at
 // maxObjects writes or timeBudgetMs and returns `after` to go on from.
-export async function restoreFiles(backup: R2FilesLike, target: R2FilesLike, options: RestoreFilesOptions): Promise<RestoreFilesResult> {
+export async function restoreFiles(
+  backup: R2FilesLike,
+  target: R2FilesLike,
+  options: RestoreFilesOptions,
+): Promise<RestoreFilesResult> {
   const { name, prefix = "", apply = false, overwrite = false } = options;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) throw new Error(`d1-dump: a files backup name is letters, digits, '.', '_' and '-', not ${JSON.stringify(name)}`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name))
+    throw new Error(
+      `d1-dump: a files backup name is letters, digits, '.', '_' and '-', not ${JSON.stringify(name)}`,
+    );
   const maxObjects = options.maxObjects ?? DEFAULT_MAX_OBJECTS;
   const deadline = Date.now() + (options.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS);
   const base = `${FILES_PREFIX}${name}/`;
@@ -292,7 +362,11 @@ export async function restoreFiles(backup: R2FilesLike, target: R2FilesLike, opt
   const differ: string[] = [];
   let after = options.after ?? null;
 
-  const copies = listFrom(backup, `${base}${prefix}`, after === null ? undefined : `${base}${after}`);
+  const copies = listFrom(
+    backup,
+    `${base}${prefix}`,
+    after === null ? undefined : `${base}${after}`,
+  );
   const targets = listFrom(target, prefix, after ?? undefined);
   let t = await targets.next();
   for await (const copy of copies) {

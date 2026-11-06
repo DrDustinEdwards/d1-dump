@@ -12,7 +12,13 @@ export const JSON_TYPE = { httpMetadata: { contentType: "application/json" } };
 // The bytes equal JSON.stringify of the whole object, holding at most one part and one
 // page in memory. With `gzip` the same bytes are compressed as they stream, and the object
 // holds the gzip of them.
-export async function putJsonStreamed(bucket: R2Like, key: string, head: string, pages: AsyncIterable<unknown[]>, gzip = false): Promise<number> {
+export async function putJsonStreamed(
+  bucket: R2Like,
+  key: string,
+  head: string,
+  pages: AsyncIterable<unknown[]>,
+  gzip = false,
+): Promise<number> {
   const upload = await bucket.createMultipartUpload(key, gzip ? GZIP_TYPE : JSON_TYPE);
   const parts: R2UploadedPartLike[] = [];
   const encoder = new TextEncoder();
@@ -73,7 +79,10 @@ export async function putJsonStreamed(bucket: R2Like, key: string, head: string,
     await gzWriter?.abort(err).catch(() => {});
     // The abort's own failure is reported with the cause, never in place of it.
     await upload.abort().catch((abortErr: unknown) => {
-      throw new AggregateError([err, abortErr], `d1-dump: writing ${key} failed, and so did aborting its upload`);
+      throw new AggregateError(
+        [err, abortErr],
+        `d1-dump: writing ${key} failed, and so did aborting its upload`,
+      );
     });
     throw err;
   }
@@ -91,6 +100,7 @@ export async function listAllKeys(bucket: R2Like, prefix: string): Promise<strin
 }
 
 export async function deleteInChunks(bucket: R2Like, keys: string[]): Promise<number> {
-  for (let i = 0; i < keys.length; i += R2_DELETE_MAX) await bucket.delete(keys.slice(i, i + R2_DELETE_MAX));
+  for (let i = 0; i < keys.length; i += R2_DELETE_MAX)
+    await bucket.delete(keys.slice(i, i + R2_DELETE_MAX));
   return keys.length;
 }

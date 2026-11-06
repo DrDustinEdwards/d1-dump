@@ -22,7 +22,7 @@ import { dumpDatabase, pruneDumps } from "@dustinedwards/d1-dump";
 export default {
   async scheduled(_event, env) {
     await dumpDatabase(env.DB, env.BACKUPS); // the site's own D1 and R2 bindings
-    await pruneDumps(env.BACKUPS);           // 14 daily, 8 weekly, 6 monthly; the newest complete run always kept
+    await pruneDumps(env.BACKUPS); // 14 daily, 8 weekly, 6 monthly; the newest complete run always kept
   },
 };
 ```
@@ -76,7 +76,11 @@ The source is walked in key order beside the backup's copies, so a copy with no 
 import { restoreFiles } from "@dustinedwards/d1-dump";
 
 const plan = await restoreFiles(env.BACKUPS, env.MEDIA, { name: "media", prefix: "img/2026/" }); // a dry run
-const done = await restoreFiles(env.BACKUPS, env.MEDIA, { name: "media", prefix: "img/2026/", apply: true });
+const done = await restoreFiles(env.BACKUPS, env.MEDIA, {
+  name: "media",
+  prefix: "img/2026/",
+  apply: true,
+});
 ```
 
 `restoreFiles(backup, target, { name, prefix, apply, overwrite })` copies a files backup back into a bucket: `files/<name>/<key>` to `<key>`, with the `httpMetadata` and `customMetadata` it was backed up with (less `d1-dump-source-etag`), each body streamed. **It is a dry run unless `apply` is true**: nothing is written, and the result says what would be. `prefix` limits it to keys that start with it, as the source named them (`""`, the default, is the whole backup).
@@ -108,11 +112,11 @@ await restoreDump(env.SCRATCH_DB, env.BACKUPS, latest.prefix); // into an EMPTY 
 import { runCheckedBackup } from "@dustinedwards/d1-dump";
 
 await runCheckedBackup(env.DB, env.BACKUPS, {
-  exclude: ["session"],            // credential tables, which a backup must never carry
-  required: ["posts", "journal"],  // what exists nowhere else
-  counted: ["posts"],              // required too, and its dumped rows must equal a live count
-  check: (dump) => [],             // the site's own checks, one message per failure
-  excludeIfPresent: ["account"],   // excluded while it exists; a migration may already have dropped it
+  exclude: ["session"], // credential tables, which a backup must never carry
+  required: ["posts", "journal"], // what exists nowhere else
+  counted: ["posts"], // required too, and its dumped rows must equal a live count
+  check: (dump) => [], // the site's own checks, one message per failure
+  excludeIfPresent: ["account"], // excluded while it exists; a migration may already have dropped it
   credentials: { allow: { "posts.token_count": "a count, not a token" } }, // or true
 });
 ```
@@ -140,7 +144,13 @@ import { runRestoreDrill } from "@dustinedwards/d1-dump";
 const result = await runRestoreDrill(env.BACKUPS, {
   createScratch: async (name) => ({ db: scratchDb(name), delete: () => dropDb(name) }), // name is restore-drill-<date>-<pid>
 });
-if (!result.ok) throw new Error(result.checks.filter((c) => !c.ok).map((c) => `${c.name}: ${c.detail}`).join("; "));
+if (!result.ok)
+  throw new Error(
+    result.checks
+      .filter((c) => !c.ok)
+      .map((c) => `${c.name}: ${c.detail}`)
+      .join("; "),
+  );
 ```
 
 From Node or CI, against a dump downloaded to a directory (`<dir>/backups/json/<run id>/...`):
@@ -164,15 +174,15 @@ The d1 backend's token needs to create and delete D1 databases, and that permiss
 
 Seven checks run, and each reports what it read, so "ok" cannot mean "read nothing":
 
-| Check | Fails when |
-| --- | --- |
-| `dump` | no complete run, or its marker is more than 26 hours old |
-| `restore` | `restoreDump` throws, which includes its own count check against the marker |
-| `counts` | a table, counted again after the restore, differs from the marker, or the copy holds no rows |
-| `fts` | an external FTS5 index holds fewer documents than its content table (counted through `_docsize`, because `COUNT(*)` on an external-content FTS5 table reads through to the content table and cannot disagree), or an internal one fewer than the dump held |
-| `search` | a word taken from a restored row is not found through the index, or the database has FTS5 tables but none held a word to search for (a database with no FTS5 table passes and says so) |
-| `statements` | any statement sent was over D1's 100,000 byte cap, or none was sent |
-| `scratch` | the scratch database was not deleted; the detail names it |
+| Check        | Fails when                                                                                                                                                                                                                                                 |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dump`       | no complete run, or its marker is more than 26 hours old                                                                                                                                                                                                   |
+| `restore`    | `restoreDump` throws, which includes its own count check against the marker                                                                                                                                                                                |
+| `counts`     | a table, counted again after the restore, differs from the marker, or the copy holds no rows                                                                                                                                                               |
+| `fts`        | an external FTS5 index holds fewer documents than its content table (counted through `_docsize`, because `COUNT(*)` on an external-content FTS5 table reads through to the content table and cannot disagree), or an internal one fewer than the dump held |
+| `search`     | a word taken from a restored row is not found through the index, or the database has FTS5 tables but none held a word to search for (a database with no FTS5 table passes and says so)                                                                     |
+| `statements` | any statement sent was over D1's 100,000 byte cap, or none was sent                                                                                                                                                                                        |
+| `scratch`    | the scratch database was not deleted; the detail names it                                                                                                                                                                                                  |
 
 **No statement over the cap is ever sent.** Every statement passes through `guardStatements`, which measures the SQL text in UTF-8 bytes and throws on one over 100,000 before it reaches the database. Rows go in as short `INSERT ... VALUES (?1, ?2, ...)` statements with the values bound, so a row of any size is a short statement. `wrangler d1 export` once wrote a 141 KB paper as one literal `INSERT`, which D1 refused. `test/drill.test.ts` restores a 141 KB value with newlines, quotes and carriage returns, and a 1.5 MB value, byte for byte, and reads the longest statement and the largest bound value from the guard. The same test shows the cap is live in the test runtime by sending a 141 KB value as a literal, which is refused.
 
@@ -196,10 +206,10 @@ A d1 drill that dies before its `finally` leaves a database named `restore-drill
 
 **Measured against a local D1 (31 Oct 2026).** The drill's restore and checks were run with a scratch database on the D1 that `wrangler d1 --local` runs (Miniflare 4.20260730.0, workerd's D1), rather than on Node's SQLite, through `runRestoreDrill` with `createScratch` handing it a fresh Miniflare D1, as `test/drill.test.ts` does at a small size:
 
-| Database | Tables | Rows | Dump size | Dump | Restore and checks | Result |
-| --- | --- | --- | --- | --- | --- | --- |
-| a copy of a site's local database (dustinedwards.info), 3 FTS5 tables | 35 | 1,422 | 8.3 MB | 1.4 s | 18.9 s | all seven checks passed; 1,637 statements in 28 batches, the longest 1,589 bytes, the largest bound value 141,043 bytes |
-| synthetic: one table of 2 KB rows with an external FTS5 index | 1 | 20,000 | 38 MB | 2.0 s | 2 min 55 s | all seven checks passed |
+| Database                                                              | Tables | Rows   | Dump size | Dump  | Restore and checks | Result                                                                                                                  |
+| --------------------------------------------------------------------- | ------ | ------ | --------- | ----- | ------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| a copy of a site's local database (dustinedwards.info), 3 FTS5 tables | 35     | 1,422  | 8.3 MB    | 1.4 s | 18.9 s             | all seven checks passed; 1,637 statements in 28 batches, the longest 1,589 bytes, the largest bound value 141,043 bytes |
+| synthetic: one table of 2 KB rows with an external FTS5 index         | 1      | 20,000 | 38 MB     | 2.0 s | 2 min 55 s         | all seven checks passed                                                                                                 |
 
 So the restore's statements and bound values are accepted by D1's own engine, the 141 KB value included, and on this machine the restore took 2 to 5 seconds a megabyte of dump. What this does not prove: Cloudflare's remote D1 and its REST API limits, which only the d1 backend above measures, and that run still needs a token that can create a database. That number, with a timed D1 Time Travel restore, is still owed: neither has been run against a remote database.
 

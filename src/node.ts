@@ -20,7 +20,8 @@ import type { D1Like, D1Statement, R2FilesLike, R2Like, R2ObjectLike } from "./t
 export function pathInside(root: string, key: string): string {
   const base = resolve(root);
   const path = resolve(base, ...key.split("/"));
-  if (isAbsolute(key) || !path.startsWith(base + sep)) throw new Error(`d1-dump: ${key} is outside ${root}`);
+  if (isAbsolute(key) || !path.startsWith(base + sep))
+    throw new Error(`d1-dump: ${key} is outside ${root}`);
   return path;
 }
 
@@ -48,10 +49,19 @@ export function directoryBucket(root: string): R2Like {
         throw err;
       });
       if (bytes === null) return null;
-      const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      const copy = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength,
+      ) as ArrayBuffer;
       return { text: async () => bytes.toString("utf8"), arrayBuffer: async () => copy };
     },
-    list: async ({ prefix = "" }) => ({ objects: (await keysUnder(root)).filter((k) => k.startsWith(prefix)).sort().map((key) => ({ key })), truncated: false }),
+    list: async ({ prefix = "" }) => ({
+      objects: (await keysUnder(root))
+        .filter((k) => k.startsWith(prefix))
+        .sort()
+        .map((key) => ({ key })),
+      truncated: false,
+    }),
     put: readOnly,
     delete: readOnly,
     createMultipartUpload: readOnly,
@@ -62,11 +72,25 @@ type Backend = "sqlite" | "d1";
 
 // sqlite unless Cloudflare credentials are set; either can be asked for. Says why, so the
 // drill's output shows which one ran. asking for d1 without credentials is an error.
-export function pickBackend(asked: string | undefined, credentials: boolean): { backend: Backend; why: string } | { error: string } {
-  if (asked !== undefined && asked !== "sqlite" && asked !== "d1") return { error: `--backend is sqlite or d1, not ${JSON.stringify(asked)}` };
+export function pickBackend(
+  asked: string | undefined,
+  credentials: boolean,
+): { backend: Backend; why: string } | { error: string } {
+  if (asked !== undefined && asked !== "sqlite" && asked !== "d1")
+    return { error: `--backend is sqlite or d1, not ${JSON.stringify(asked)}` };
   const backend: Backend = asked ?? (credentials ? "d1" : "sqlite");
-  if (backend === "d1" && !credentials) return { error: "--backend d1 needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment" };
-  return { backend, why: asked ? "asked for" : credentials ? "Cloudflare credentials are set" : "no Cloudflare credentials are set" };
+  if (backend === "d1" && !credentials)
+    return {
+      error: "--backend d1 needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment",
+    };
+  return {
+    backend,
+    why: asked
+      ? "asked for"
+      : credentials
+        ? "Cloudflare credentials are set"
+        : "no Cloudflare credentials are set",
+  };
 }
 
 // A scratch database in a local SQLite file, for a drill that must hold no Cloudflare
@@ -76,7 +100,10 @@ export function pickBackend(asked: string | undefined, credentials: boolean): { 
 // then checks it is gone.
 export function sqliteScratch(): (name: string) => Promise<Scratch> {
   return async (name) => {
-    if (!name.startsWith(SCRATCH_PREFIX)) throw new Error(`d1-dump: refusing to create ${JSON.stringify(name)}: a scratch database starts with ${SCRATCH_PREFIX}`);
+    if (!name.startsWith(SCRATCH_PREFIX))
+      throw new Error(
+        `d1-dump: refusing to create ${JSON.stringify(name)}: a scratch database starts with ${SCRATCH_PREFIX}`,
+      );
     const dir = mkdtempSync(join(tmpdir(), `${name}-`));
     const file = join(dir, `${name}.sqlite`);
     const sqlite = new DatabaseSync(file);
@@ -90,7 +117,10 @@ export function sqliteScratch(): (name: string) => Promise<Scratch> {
         .all(...sqlValues(values))
         .map((r) => ({ ...r }));
 
-    const statement = (sql: string, values: unknown[] = []): D1Statement & { exec(): { results: unknown[] } } => ({
+    const statement = (
+      sql: string,
+      values: unknown[] = [],
+    ): D1Statement & { exec(): { results: unknown[] } } => ({
       bind: (...next) => statement(sql, next),
       all: (async <T>() => ({ results: rowsOf(sql, values) as T[] })) as D1Statement["all"],
       run: async () => sqlite.prepare(sql).run(...sqlValues(values)),
@@ -102,7 +132,9 @@ export function sqliteScratch(): (name: string) => Promise<Scratch> {
       batch: async <T>(statements: D1Statement[]) => {
         sqlite.exec("BEGIN");
         try {
-          const out = statements.map((s) => (s as ReturnType<typeof statement>).exec() as { results: T[] });
+          const out = statements.map(
+            (s) => (s as ReturnType<typeof statement>).exec() as { results: T[] },
+          );
           sqlite.exec("COMMIT");
           return out;
         } catch (err) {
@@ -126,19 +158,29 @@ export function sqliteScratch(): (name: string) => Promise<Scratch> {
 // keys' paths, for a drill through directoryBucket(root). Its objects are the ones its marker
 // lists, then the marker. A listed object that is missing is left out, so the drill's own
 // checks fail on it. null when the bucket holds no complete run.
-export async function downloadLatestRun(bucket: RestBucket, root: string, prefix: string = DEFAULT_PREFIX): Promise<{ prefix: string; objects: number } | null> {
+export async function downloadLatestRun(
+  bucket: RestBucket,
+  root: string,
+  prefix: string = DEFAULT_PREFIX,
+): Promise<{ prefix: string; objects: number } | null> {
   const latest = await latestDump(bucket, { prefix });
   if (!latest) return null;
   const markerKey = `${latest.prefix}${COMPLETE_MARKER}`;
-  const marker = JSON.parse((await (await bucket.get(markerKey))?.text()) ?? "{}") as Partial<CompleteMarker>;
+  const marker = JSON.parse(
+    (await (await bucket.get(markerKey))?.text()) ?? "{}",
+  ) as Partial<CompleteMarker>;
   let objects = 0;
   for (const key of [...(marker.keys ?? []).filter((k) => k !== markerKey), markerKey]) {
-    if (!key.startsWith(latest.prefix) || key.split("/").includes("..")) throw new Error(`d1-dump: ${markerKey} lists ${key}, outside its run`);
+    if (!key.startsWith(latest.prefix) || key.split("/").includes(".."))
+      throw new Error(`d1-dump: ${markerKey} lists ${key}, outside its run`);
     const body = await bucket.stream(key);
     if (!body) continue;
     const path = pathInside(root, key);
     await mkdir(dirname(path), { recursive: true });
-    await pipeline(Readable.fromWeb(body as NodeReadableStream<Uint8Array>), createWriteStream(path));
+    await pipeline(
+      Readable.fromWeb(body as NodeReadableStream<Uint8Array>),
+      createWriteStream(path),
+    );
     objects++;
   }
   return { prefix: latest.prefix, objects };
@@ -161,18 +203,30 @@ export interface BucketDrillOptions {
 // every check passes, 1 when one fails, and 3 when the drill could not run (no credentials,
 // an API error); the first line says which. The token is sent only as the Authorization
 // header and is never in a line.
-export async function drillFromBucket(options: BucketDrillOptions): Promise<{ code: 0 | 1 | 3; lines: string[] }> {
+export async function drillFromBucket(
+  options: BucketDrillOptions,
+): Promise<{ code: 0 | 1 | 3; lines: string[] }> {
   const { accountId, apiToken } = options;
   const backend = options.backend ?? "sqlite";
-  const cannot = (why: string) => ({ code: 3 as const, lines: [`restore drill could not run: ${why}`] });
-  if (backend !== "sqlite" && backend !== "d1") return cannot(`--backend is sqlite or d1, not ${JSON.stringify(backend)}`);
-  if (!accountId || !apiToken) return cannot("--bucket needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment");
+  const cannot = (why: string) => ({
+    code: 3 as const,
+    lines: [`restore drill could not run: ${why}`],
+  });
+  if (backend !== "sqlite" && backend !== "d1")
+    return cannot(`--backend is sqlite or d1, not ${JSON.stringify(backend)}`);
+  if (!accountId || !apiToken)
+    return cannot(
+      "--bucket needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment",
+    );
   const root = mkdtempSync(join(tmpdir(), "d1-dump-bucket-"));
   try {
     const bucket = cloudflareBucket(accountId, apiToken, options.bucket, options.fetchImpl);
     const downloaded = await downloadLatestRun(bucket, root, options.prefix);
     const result = await runRestoreDrill(directoryBucket(root), {
-      createScratch: backend === "d1" ? cloudflareScratch(accountId, apiToken, options.fetchImpl) : sqliteScratch(),
+      createScratch:
+        backend === "d1"
+          ? cloudflareScratch(accountId, apiToken, options.fetchImpl)
+          : sqliteScratch(),
       prefix: downloaded?.prefix,
       maxAgeHours: options.maxAgeHours,
     });
@@ -239,7 +293,13 @@ function directoryFiles(root: string): R2FilesLike {
     }
     return out;
   };
-  const object = (key: string): R2ObjectLike => ({ key, etag: "", size: 0, httpMetadata: {}, customMetadata: {} });
+  const object = (key: string): R2ObjectLike => ({
+    key,
+    etag: "",
+    size: 0,
+    httpMetadata: {},
+    customMetadata: {},
+  });
   return {
     list: async ({ prefix = "", startAfter }) => ({
       objects: (await all(root))
@@ -251,12 +311,19 @@ function directoryFiles(root: string): R2FilesLike {
     get: async (key) => {
       const path = pathInside(root, key);
       if (!existsSync(path)) return null;
-      return { ...object(key), body: Readable.toWeb(createReadStream(path)), text: () => readFile(path, "utf8") };
+      return {
+        ...object(key),
+        body: Readable.toWeb(createReadStream(path)),
+        text: () => readFile(path, "utf8"),
+      };
     },
     put: async (key, value) => {
       const path = pathInside(root, key);
       await mkdir(dirname(path), { recursive: true });
-      const body = value instanceof Uint8Array || typeof value === "string" ? Readable.from([value]) : Readable.fromWeb(value as NodeReadableStream<Uint8Array>);
+      const body =
+        value instanceof Uint8Array || typeof value === "string"
+          ? Readable.from([value])
+          : Readable.fromWeb(value as NodeReadableStream<Uint8Array>);
       await pipeline(body, createWriteStream(path));
     },
     delete: async () => {
@@ -271,31 +338,68 @@ function directoryFiles(root: string): R2FilesLike {
 // SHA-256 and length, and the MD5 the API's etag names when it is a single-part etag. code is 0
 // when every check passes, 1 when one fails (or a named backup holds no copy), 3 when it could
 // not run. The token is only the Authorization header, never in a line.
-export async function drillFilesFromBucket(options: FilesDrillOptions): Promise<{ code: 0 | 1 | 3; lines: string[] }> {
+export async function drillFilesFromBucket(
+  options: FilesDrillOptions,
+): Promise<{ code: 0 | 1 | 3; lines: string[] }> {
   const { accountId, apiToken } = options;
   const sample = options.sample ?? 5;
-  if (!accountId || !apiToken) return { code: 3, lines: ["files drill could not run: --bucket needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment"] };
-  if (!Number.isInteger(sample) || sample < 1) return { code: 3, lines: [`files drill could not run: --sample is a whole number from 1, not ${sample}`] };
+  if (!accountId || !apiToken)
+    return {
+      code: 3,
+      lines: [
+        "files drill could not run: --bucket needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment",
+      ],
+    };
+  if (!Number.isInteger(sample) || sample < 1)
+    return {
+      code: 3,
+      lines: [`files drill could not run: --sample is a whole number from 1, not ${sample}`],
+    };
   const scratch = mkdtempSync(join(tmpdir(), "d1-dump-files-"));
   const lines: string[] = [];
   let failed = false;
   try {
     const bucket = cloudflareBucket(accountId, apiToken, options.bucket, options.fetchImpl);
     const all = await keysOf(bucket, FILES_PREFIX);
-    const found = [...new Set(all.map((k) => k.slice(FILES_PREFIX.length).split("/")[0]).filter(Boolean))].sort();
+    const found = [
+      ...new Set(all.map((k) => k.slice(FILES_PREFIX.length).split("/")[0]).filter(Boolean)),
+    ].sort();
     const names = options.names?.length ? options.names : found;
-    if (!names.length) return { code: 0, lines: [`files drill: ${options.bucket} holds no files backup, so there is nothing to drill`] };
+    if (!names.length)
+      return {
+        code: 0,
+        lines: [
+          `files drill: ${options.bucket} holds no files backup, so there is nothing to drill`,
+        ],
+      };
     for (const name of names) {
       const base = `${FILES_PREFIX}${name}/`;
-      const copies = all.filter((k) => k.startsWith(base) && k !== `${base}${FILES_PROGRESS}` && k !== `${base}${FILES_COMPLETE}`).sort();
+      const copies = all
+        .filter(
+          (k) =>
+            k.startsWith(base) &&
+            k !== `${base}${FILES_PROGRESS}` &&
+            k !== `${base}${FILES_COMPLETE}`,
+        )
+        .sort();
       if (!copies.length) {
         failed = true;
         lines.push(`  FAIL ${name}: no copies under ${base}`);
         continue;
       }
-      if (!all.includes(`${base}${FILES_COMPLETE}`)) lines.push(`  note ${name}: no complete pass yet (${base}${FILES_COMPLETE}); drilling the copies there are`);
+      if (!all.includes(`${base}${FILES_COMPLETE}`))
+        lines.push(
+          `  note ${name}: no complete pass yet (${base}${FILES_COMPLETE}); drilling the copies there are`,
+        );
       const step = copies.length / Math.min(sample, copies.length);
-      const picked = [...new Set(Array.from({ length: Math.min(sample, copies.length) }, (_, i) => copies[Math.floor(i * step)]))];
+      const picked = [
+        ...new Set(
+          Array.from(
+            { length: Math.min(sample, copies.length) },
+            (_, i) => copies[Math.floor(i * step)],
+          ),
+        ),
+      ];
       const from = pathInside(scratch, `${name}/backup`);
       const into = pathInside(scratch, `${name}/restored`);
       const held = new Map<string, { etag: string | null }>();
@@ -304,13 +408,23 @@ export async function drillFilesFromBucket(options: FilesDrillOptions): Promise<
         if (!res?.body) throw new Error(`${key} was listed and then could not be read`);
         const path = pathInside(from, key);
         await mkdir(dirname(path), { recursive: true });
-        await pipeline(Readable.fromWeb(res.body as NodeReadableStream<Uint8Array>), createWriteStream(path));
-        held.set(key, { etag: res.headers.get("etag")?.replace(/^W\//, "").replace(/"/g, "") ?? null });
+        await pipeline(
+          Readable.fromWeb(res.body as NodeReadableStream<Uint8Array>),
+          createWriteStream(path),
+        );
+        held.set(key, {
+          etag: res.headers.get("etag")?.replace(/^W\//, "").replace(/"/g, "") ?? null,
+        });
       }
-      const result = await restoreFiles(directoryFiles(from), directoryFiles(into), { name, apply: true });
+      const result = await restoreFiles(directoryFiles(from), directoryFiles(into), {
+        name,
+        apply: true,
+      });
       const restored = result.counts.written === picked.length;
       if (!restored) failed = true;
-      lines.push(`  ${restored ? "ok  " : "FAIL"} ${name}: restoreFiles wrote ${result.counts.written} of ${picked.length} sampled copies (of ${copies.length})`);
+      lines.push(
+        `  ${restored ? "ok  " : "FAIL"} ${name}: restoreFiles wrote ${result.counts.written} of ${picked.length} sampled copies (of ${copies.length})`,
+      );
       for (const key of picked) {
         const copy = await digest(pathInside(from, key));
         const target = pathInside(into, key.slice(base.length));
@@ -319,16 +433,31 @@ export async function drillFilesFromBucket(options: FilesDrillOptions): Promise<
         const problems: string[] = [];
         if (!back) problems.push("not restored");
         else {
-          if (back.sha256 !== copy.sha256 || back.bytes !== copy.bytes) problems.push(`restored ${back.bytes} bytes (sha256 ${back.sha256.slice(0, 12)}), the copy has ${copy.bytes} (${copy.sha256.slice(0, 12)})`);
-          if (etag && /^[0-9a-f]{32}$/i.test(etag) && etag.toLowerCase() !== back.md5) problems.push(`MD5 ${back.md5} is not the etag ${etag}`);
+          if (back.sha256 !== copy.sha256 || back.bytes !== copy.bytes)
+            problems.push(
+              `restored ${back.bytes} bytes (sha256 ${back.sha256.slice(0, 12)}), the copy has ${copy.bytes} (${copy.sha256.slice(0, 12)})`,
+            );
+          if (etag && /^[0-9a-f]{32}$/i.test(etag) && etag.toLowerCase() !== back.md5)
+            problems.push(`MD5 ${back.md5} is not the etag ${etag}`);
         }
         if (problems.length) failed = true;
-        lines.push(`    ${problems.length ? "FAIL" : "ok  "} ${key.slice(base.length)}: ${problems.length ? problems.join("; ") : `${back?.bytes} bytes match${etag && /^[0-9a-f]{32}$/i.test(etag) ? " and the etag" : ""}`}`);
+        lines.push(
+          `    ${problems.length ? "FAIL" : "ok  "} ${key.slice(base.length)}: ${problems.length ? problems.join("; ") : `${back?.bytes} bytes match${etag && /^[0-9a-f]{32}$/i.test(etag) ? " and the etag" : ""}`}`,
+        );
       }
     }
-    return { code: failed ? 1 : 0, lines: [`files drill ${failed ? "FAILED" : "PASSED"}: ${names.join(", ")} from ${options.bucket}, ${sample} sampled each, restored into a scratch directory`, ...lines] };
+    return {
+      code: failed ? 1 : 0,
+      lines: [
+        `files drill ${failed ? "FAILED" : "PASSED"}: ${names.join(", ")} from ${options.bucket}, ${sample} sampled each, restored into a scratch directory`,
+        ...lines,
+      ],
+    };
   } catch (err) {
-    return { code: 3, lines: [`files drill could not run: ${err instanceof Error ? err.message : String(err)}`] };
+    return {
+      code: 3,
+      lines: [`files drill could not run: ${err instanceof Error ? err.message : String(err)}`],
+    };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

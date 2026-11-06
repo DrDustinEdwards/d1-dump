@@ -2,7 +2,13 @@ import { Miniflare } from "miniflare";
 import type { D1Like, DrillResult, R2FilesLike, R2Like, StatementStats } from "../src/index.js";
 
 // Real D1 (SQLite with FTS5) and R2, in-process, as workerd runs them.
-export async function sandbox(): Promise<{ src: D1Like; dst: D1Like; bucket: R2Like; media: R2FilesLike; dispose: () => Promise<void> }> {
+export async function sandbox(): Promise<{
+  src: D1Like;
+  dst: D1Like;
+  bucket: R2Like;
+  media: R2FilesLike;
+  dispose: () => Promise<void>;
+}> {
   const mf = new Miniflare({
     modules: true,
     script: "export default { fetch() { return new Response('ok') } }",
@@ -62,9 +68,13 @@ export function statsOf(result: DrillResult): StatementStats {
 }
 
 /** The key of a dumped table's file, or a throw naming the tables that were dumped. */
-export function tableKey(dumped: { tables: Array<{ name: string; key: string }> }, name: string): string {
+export function tableKey(
+  dumped: { tables: Array<{ name: string; key: string }> },
+  name: string,
+): string {
   const t = dumped.tables.find((x) => x.name === name);
-  if (!t) throw new Error(`no ${name} table was dumped: ${dumped.tables.map((x) => x.name).join(", ")}`);
+  if (!t)
+    throw new Error(`no ${name} table was dumped: ${dumped.tables.map((x) => x.name).join(", ")}`);
   return t.key;
 }
 

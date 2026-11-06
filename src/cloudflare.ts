@@ -42,11 +42,14 @@ interface Query {
 class RestStatement implements D1Statement {
   constructor(
     private readonly run_: (queries: Query[]) => Promise<Array<{ results: unknown[] }>>,
-    readonly query: Query
+    readonly query: Query,
   ) {}
   bind(...values: unknown[]): D1Statement {
     for (const v of values) {
-      if (Array.isArray(v)) throw new Error("d1-dump: the REST API cannot bind a BLOB, so a table holding one cannot be drilled over REST");
+      if (Array.isArray(v))
+        throw new Error(
+          "d1-dump: the REST API cannot bind a BLOB, so a table holding one cannot be drilled over REST",
+        );
     }
     return new RestStatement(this.run_, { sql: this.query.sql, params: values });
   }
@@ -59,7 +62,11 @@ class RestStatement implements D1Statement {
   }
 }
 
-export function cloudflareScratch(accountId: string, apiToken: string, fetchImpl: typeof fetch = fetch): (name: string) => Promise<Scratch> {
+export function cloudflareScratch(
+  accountId: string,
+  apiToken: string,
+  fetchImpl: typeof fetch = fetch,
+): (name: string) => Promise<Scratch> {
   const call = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
     const res = await fetchImpl(`${API}/accounts/${accountId}${path}`, {
       method,
@@ -71,7 +78,10 @@ export function cloudflareScratch(accountId: string, apiToken: string, fetchImpl
 
   return async (name) => {
     // The one place a database is created or deleted, so nothing else can be touched.
-    if (!name.startsWith(SCRATCH_PREFIX)) throw new Error(`d1-dump: refusing to create ${JSON.stringify(name)}: a scratch database starts with ${SCRATCH_PREFIX}`);
+    if (!name.startsWith(SCRATCH_PREFIX))
+      throw new Error(
+        `d1-dump: refusing to create ${JSON.stringify(name)}: a scratch database starts with ${SCRATCH_PREFIX}`,
+      );
     const created = await call<{ uuid: string }>("POST", "/d1/database", { name });
     const id = created.uuid;
     const send = async (queries: Query[]) => {
@@ -99,14 +109,21 @@ export interface RestBucket extends R2Like {
   response(key: string): Promise<Response | null>;
 }
 
-export function cloudflareBucket(accountId: string, apiToken: string, bucketName: string, fetchImpl: typeof fetch = fetch): RestBucket {
+export function cloudflareBucket(
+  accountId: string,
+  apiToken: string,
+  bucketName: string,
+  fetchImpl: typeof fetch = fetch,
+): RestBucket {
   const objects = `${API}/accounts/${encodeURIComponent(accountId)}/r2/buckets/${encodeURIComponent(bucketName)}/objects`;
   const headers = { authorization: `Bearer ${apiToken}` };
   const readOnly = async (): Promise<never> => {
     throw new Error("d1-dump: a bucket read over REST is read only");
   };
   const object = async (key: string): Promise<Response | null> => {
-    const res = await fetchImpl(`${objects}/${key.split("/").map(encodeURIComponent).join("/")}`, { headers });
+    const res = await fetchImpl(`${objects}/${key.split("/").map(encodeURIComponent).join("/")}`, {
+      headers,
+    });
     if (res.status === 404) return null;
     if (!res.ok) await envelope(res, `GET ${bucketName}/${key}`);
     return res;
@@ -115,9 +132,16 @@ export function cloudflareBucket(accountId: string, apiToken: string, bucketName
     list: async ({ prefix = "", cursor }) => {
       const query = new URLSearchParams({ prefix, per_page: "1000" });
       if (cursor) query.set("cursor", cursor);
-      const page = await envelope<Array<{ key: string }>>(await fetchImpl(`${objects}?${query}`, { headers }), `list ${bucketName}/${prefix}`);
+      const page = await envelope<Array<{ key: string }>>(
+        await fetchImpl(`${objects}?${query}`, { headers }),
+        `list ${bucketName}/${prefix}`,
+      );
       const truncated = page.result_info?.is_truncated === true;
-      return { objects: page.result.map((o) => ({ key: o.key })), truncated, cursor: truncated ? page.result_info?.cursor : undefined };
+      return {
+        objects: page.result.map((o) => ({ key: o.key })),
+        truncated,
+        cursor: truncated ? page.result_info?.cursor : undefined,
+      };
     },
     get: async (key) => {
       const res = await object(key);

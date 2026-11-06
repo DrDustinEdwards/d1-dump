@@ -1,8 +1,26 @@
 import { existsSync } from "node:fs";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { D1_MAX_STATEMENT_BYTES, dumpDatabase, restoreDump, runRestoreDrill, writeCompleteMarker, type D1Like, type R2Like } from "../src/index.js";
+import {
+  D1_MAX_STATEMENT_BYTES,
+  dumpDatabase,
+  restoreDump,
+  runRestoreDrill,
+  writeCompleteMarker,
+  type D1Like,
+  type R2Like,
+} from "../src/index.js";
 import { pickBackend, sqliteScratch } from "../src/node.js";
-import { SITE_ROWS, SITE_SCHEMA, checkOf, exec, readText, rows, sandbox, statsOf, tableKey } from "./helpers.js";
+import {
+  SITE_ROWS,
+  SITE_SCHEMA,
+  checkOf,
+  exec,
+  readText,
+  rows,
+  sandbox,
+  statsOf,
+  tableKey,
+} from "./helpers.js";
 
 // The same drill against the tokenless backend: a local SQLite file (node:sqlite).
 
@@ -22,7 +40,9 @@ const LATER = new Date("2026-09-27T10:00:00.000Z");
 
 // A sqlite scratch backend that can rewrite statements, and reads a query from the copy
 // just before the drill deletes it.
-function scratchWith(options: { rewrite?: (sql: string) => string; readBeforeDelete?: string } = {}) {
+function scratchWith(
+  options: { rewrite?: (sql: string) => string; readBeforeDelete?: string } = {},
+) {
   const make = sqliteScratch();
   const out = { names: [] as string[], read: undefined as unknown };
   return {
@@ -31,11 +51,14 @@ function scratchWith(options: { rewrite?: (sql: string) => string; readBeforeDel
       const scratch = await make(name);
       out.names.push(name);
       const { rewrite } = options;
-      const db: D1Like = rewrite ? { prepare: (sql) => scratch.db.prepare(rewrite(sql)), batch: (s) => scratch.db.batch(s) } : scratch.db;
+      const db: D1Like = rewrite
+        ? { prepare: (sql) => scratch.db.prepare(rewrite(sql)), batch: (s) => scratch.db.batch(s) }
+        : scratch.db;
       return {
         db,
         delete: async () => {
-          if (options.readBeforeDelete) out.read = (await scratch.db.prepare(options.readBeforeDelete).all()).results;
+          if (options.readBeforeDelete)
+            out.read = (await scratch.db.prepare(options.readBeforeDelete).all()).results;
           return scratch.delete();
         },
       };
@@ -47,17 +70,29 @@ const REBUILD = (sql: string) => sql.includes("VALUES ('rebuild')");
 
 test("sqlite: a good dump passes every check, and a BLOB comes back as a BLOB", async () => {
   await dumpDatabase(src, bucket, { now: NOW });
-  const scratch = scratchWith({ readBeforeDelete: "SELECT typeof(cover) AS t, hex(cover) AS h FROM posts WHERE id = 1" });
+  const scratch = scratchWith({
+    readBeforeDelete: "SELECT typeof(cover) AS t, hex(cover) AS h FROM posts WHERE id = 1",
+  });
   const result = await runRestoreDrill(bucket, { ...scratch, now: LATER, pid: 77 });
   expect(result.checks.filter((c) => !c.ok)).toEqual([]);
-  expect(result.checks.map((c) => c.name)).toEqual(["dump", "restore", "counts", "fts", "search", "statements", "scratch"]);
+  expect(result.checks.map((c) => c.name)).toEqual([
+    "dump",
+    "restore",
+    "counts",
+    "fts",
+    "search",
+    "statements",
+    "scratch",
+  ]);
   expect(result.scratch).toBe("restore-drill-2026-09-27-77");
   expect(scratch.out.read).toEqual([{ t: "blob", h: "00FF10" }]);
   expect(checkOf(result, "fts").detail).toMatch(/3 FTS5 tables, 4 indexed documents/);
 });
 
 test("sqlite: a 141 KB value with newlines restores byte for byte and no statement is over the cap", async () => {
-  const paper = ("Release summary: it's 'quoted' \"twice\"\nline two\r\nline three\\n\n" + "update ".repeat(40)).repeat(420);
+  const paper = (
+    "Release summary: it's 'quoted' \"twice\"\nline two\r\nline three\\n\n" + "update ".repeat(40)
+  ).repeat(420);
   await exec(src, ["CREATE TABLE papers (id INTEGER PRIMARY KEY, body TEXT)"]);
   await src.prepare("INSERT INTO papers (body) VALUES (?1)").bind(paper).run();
   await dumpDatabase(src, bucket, { now: NOW });
@@ -71,7 +106,10 @@ test("sqlite: a 141 KB value with newlines restores byte for byte and no stateme
 
 test("sqlite: a dropped FTS5 rebuild fails the fts and search checks", async () => {
   await dumpDatabase(src, bucket, { now: NOW });
-  const result = await runRestoreDrill(bucket, { ...scratchWith({ rewrite: (sql) => (REBUILD(sql) ? "SELECT 1" : sql) }), now: LATER });
+  const result = await runRestoreDrill(bucket, {
+    ...scratchWith({ rewrite: (sql) => (REBUILD(sql) ? "SELECT 1" : sql) }),
+    now: LATER,
+  });
   expect(checkOf(result, "restore").ok).toBe(true);
   expect(checkOf(result, "fts")).toMatchObject({ ok: false });
   expect(checkOf(result, "fts").detail).toMatch(/posts_fts indexes 0 documents, posts holds 2/);
@@ -80,9 +118,14 @@ test("sqlite: a dropped FTS5 rebuild fails the fts and search checks", async () 
 
 test("sqlite: a row lost after the restore's own count check fails the recount, and the scratch file is still removed", async () => {
   await dumpDatabase(src, bucket, { now: NOW });
-  const scratch = scratchWith({ rewrite: (sql) => (REBUILD(sql) ? 'DELETE FROM "comments" WHERE "id" = 3' : sql) });
+  const scratch = scratchWith({
+    rewrite: (sql) => (REBUILD(sql) ? 'DELETE FROM "comments" WHERE "id" = 3' : sql),
+  });
   const result = await runRestoreDrill(bucket, { ...scratch, now: LATER });
-  expect(checkOf(result, "counts")).toMatchObject({ ok: false, detail: "comments has 2, the marker says 3" });
+  expect(checkOf(result, "counts")).toMatchObject({
+    ok: false,
+    detail: "comments has 2, the marker says 3",
+  });
   expect(checkOf(result, "scratch").ok).toBe(true);
   expect(scratch.out.names.length).toBe(1);
 });
@@ -99,17 +142,32 @@ test("sqlite: the scratch directory is removed, and only a restore-drill name is
 test("sqlite: a batch is one transaction, so a failed statement leaves none of it", async () => {
   const s = await sqliteScratch()("restore-drill-t");
   await s.db.prepare("CREATE TABLE t (a INTEGER PRIMARY KEY)").run();
-  await expect(s.db.batch([s.db.prepare("INSERT INTO t (a) VALUES (1)"), s.db.prepare("INSERT INTO t (a) VALUES (1)")])).rejects.toThrow();
+  await expect(
+    s.db.batch([
+      s.db.prepare("INSERT INTO t (a) VALUES (1)"),
+      s.db.prepare("INSERT INTO t (a) VALUES (1)"),
+    ]),
+  ).rejects.toThrow();
   expect((await s.db.prepare("SELECT COUNT(*) AS n FROM t").all()).results).toEqual([{ n: 0 }]);
   await s.delete();
 });
 
 test("the backend is sqlite without credentials, d1 with them, and either can be asked for", () => {
-  expect(pickBackend(undefined, false)).toEqual({ backend: "sqlite", why: "no Cloudflare credentials are set" });
-  expect(pickBackend(undefined, true)).toEqual({ backend: "d1", why: "Cloudflare credentials are set" });
+  expect(pickBackend(undefined, false)).toEqual({
+    backend: "sqlite",
+    why: "no Cloudflare credentials are set",
+  });
+  expect(pickBackend(undefined, true)).toEqual({
+    backend: "d1",
+    why: "Cloudflare credentials are set",
+  });
   expect(pickBackend("sqlite", true)).toEqual({ backend: "sqlite", why: "asked for" });
-  expect(pickBackend("d1", false)).toEqual({ error: "--backend d1 needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment" });
-  expect(pickBackend("oracle", false)).toMatchObject({ error: expect.stringContaining("sqlite or d1") });
+  expect(pickBackend("d1", false)).toEqual({
+    error: "--backend d1 needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment",
+  });
+  expect(pickBackend("oracle", false)).toMatchObject({
+    error: expect.stringContaining("sqlite or d1"),
+  });
 });
 
 // A column dropped from EVERY row of a table: row 0 agrees with its siblings, so only the
@@ -121,7 +179,9 @@ test("a column missing from every row of a table is refused, naming it", async (
   for (const row of file.rows) delete row.text;
   await bucket.put(key, JSON.stringify(file));
   await writeCompleteMarker(bucket, dumped);
-  await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(/comments row 0 does not match the schema's columns \(lacks: text;/);
+  await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(
+    /comments row 0 does not match the schema's columns \(lacks: text;/,
+  );
 });
 
 test("a column the schema does not have is refused too, and an FTS5 table that carries a rowid is not", async () => {
@@ -130,14 +190,18 @@ test("a column the schema does not have is refused too, and an FTS5 table that c
   const file = JSON.parse(await readText(bucket, key));
   for (const row of file.rows) row.extra = 1;
   await bucket.put(key, JSON.stringify(file));
-  await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(/settings row 0 .*not in the schema: extra/);
+  await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(
+    /settings row 0 .*not in the schema: extra/,
+  );
 
   const clean = await sandbox();
   try {
     await exec(clean.src, [...SITE_SCHEMA, ...SITE_ROWS]);
     const ok = await dumpDatabase(clean.src, clean.bucket, { now: NOW });
     await restoreDump(clean.dst, clean.bucket, ok.prefix);
-    expect((await rows(clean.dst, "SELECT rowid FROM glossary ORDER BY rowid")).map((r) => r.rowid)).toEqual([7, 9]);
+    expect(
+      (await rows(clean.dst, "SELECT rowid FROM glossary ORDER BY rowid")).map((r) => r.rowid),
+    ).toEqual([7, 9]);
   } finally {
     await clean.dispose();
   }

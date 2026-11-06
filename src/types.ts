@@ -25,14 +25,28 @@ export interface R2MultipartLike {
 }
 
 export interface R2Like {
-  put(key: string, value: string | Uint8Array, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+  put(
+    key: string,
+    value: string | Uint8Array,
+    options?: { httpMetadata?: { contentType?: string } },
+  ): Promise<unknown>;
   // arrayBuffer is what a gzip object (a dump written with `compress`) is read through.
-  get(key: string): Promise<{ text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer> } | null>;
+  get(
+    key: string,
+  ): Promise<{ text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer> } | null>;
   // `delimiter` groups the keys under each next "/" into delimitedPrefixes, so a listing can name the runs without
   // reading every key in them. An R2 binding does this; a bucket that answers without delimitedPrefixes is listed whole.
-  list(options: { prefix?: string; cursor?: string; delimiter?: string }): Promise<{ objects: Array<{ key: string }>; truncated: boolean; cursor?: string; delimitedPrefixes?: string[] }>;
+  list(options: { prefix?: string; cursor?: string; delimiter?: string }): Promise<{
+    objects: Array<{ key: string }>;
+    truncated: boolean;
+    cursor?: string;
+    delimitedPrefixes?: string[];
+  }>;
   delete(keys: string | string[]): Promise<void>;
-  createMultipartUpload(key: string, options?: { httpMetadata?: { contentType?: string } }): Promise<R2MultipartLike>;
+  createMultipartUpload(
+    key: string,
+    options?: { httpMetadata?: { contentType?: string } },
+  ): Promise<R2MultipartLike>;
 }
 
 // The parts of an R2 binding a file backup calls, on the source bucket and the backup bucket.
@@ -62,6 +76,10 @@ export interface R2FilesLike {
     include?: Array<"httpMetadata" | "customMetadata">;
   }): Promise<{ objects: R2ObjectLike[]; truncated: boolean; cursor?: string }>;
   get(key: string): Promise<(R2ObjectLike & { body: unknown; text(): Promise<string> }) | null>;
-  put(key: string, value: unknown, options?: { httpMetadata?: R2HttpMetadataLike; customMetadata?: Record<string, string> }): Promise<unknown>;
+  put(
+    key: string,
+    value: unknown,
+    options?: { httpMetadata?: R2HttpMetadataLike; customMetadata?: Record<string, string> },
+  ): Promise<unknown>;
   delete(keys: string | string[]): Promise<void>;
 }

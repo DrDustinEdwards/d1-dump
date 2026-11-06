@@ -1,4 +1,10 @@
-import { COMPLETE_MARKER, DEFAULT_PREFIX, LATEST_POINTER, type CompleteMarker, type LatestPointer } from "./dump.js";
+import {
+  COMPLETE_MARKER,
+  DEFAULT_PREFIX,
+  LATEST_POINTER,
+  type CompleteMarker,
+  type LatestPointer,
+} from "./dump.js";
 import { deleteInChunks, listAllKeys } from "./r2.js";
 import type { R2Like } from "./types.js";
 
@@ -9,7 +15,10 @@ export const DEFAULT_MIN_KEPT = 14;
 
 // Run id -> its keys, newest run first. A run id is the ISO time with ':' and '.'
 // replaced, so it sorts as the time does.
-async function runsOf(bucket: R2Like, prefix: string): Promise<Array<{ id: string; keys: string[]; complete: boolean }>> {
+async function runsOf(
+  bucket: R2Like,
+  prefix: string,
+): Promise<Array<{ id: string; keys: string[]; complete: boolean }>> {
   const byRun = new Map<string, string[]>();
   for (const key of await listAllKeys(bucket, prefix)) {
     const id = key.slice(prefix.length).split("/")[0];
@@ -18,7 +27,11 @@ async function runsOf(bucket: R2Like, prefix: string): Promise<Array<{ id: strin
   }
   return [...byRun.entries()]
     .sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0))
-    .map(([id, keys]) => ({ id, keys, complete: keys.includes(`${prefix}${id}/${COMPLETE_MARKER}`) }));
+    .map(([id, keys]) => ({
+      id,
+      keys,
+      complete: keys.includes(`${prefix}${id}/${COMPLETE_MARKER}`),
+    }));
 }
 
 export interface LatestDump {
@@ -60,13 +73,20 @@ async function pointedDump(bucket: R2Like, prefix: string): Promise<LatestDump |
   if (typeof id !== "string" || !id || id.includes("/")) return null;
   const marker = await bucket.get(`${prefix}${id}/${COMPLETE_MARKER}`);
   if (!marker) return null;
-  return { run_id: id, prefix: `${prefix}${id}/`, exported_at: (JSON.parse(await marker.text()) as CompleteMarker).exported_at };
+  return {
+    run_id: id,
+    prefix: `${prefix}${id}/`,
+    exported_at: (JSON.parse(await marker.text()) as CompleteMarker).exported_at,
+  };
 }
 
 // The newest complete dump, or null when there is none. Read from the pointer each marker
 // write leaves (two gets, no list); the bucket is listed only when the pointer is missing or
 // names a run that is no longer complete.
-export async function latestDump(bucket: R2Like, options: { prefix?: string } = {}): Promise<LatestDump | null> {
+export async function latestDump(
+  bucket: R2Like,
+  options: { prefix?: string } = {},
+): Promise<LatestDump | null> {
   const prefix = options.prefix ?? DEFAULT_PREFIX;
   const pointed = await pointedDump(bucket, prefix);
   if (pointed) return pointed;
@@ -91,14 +111,18 @@ export interface BackupHealth {
 
 export async function backupHealth(
   bucket: R2Like,
-  options: { prefix?: string; now?: Date; staleHours?: number } = {}
+  options: { prefix?: string; now?: Date; staleHours?: number } = {},
 ): Promise<BackupHealth> {
   const staleHours = options.staleHours ?? DEFAULT_STALE_HOURS;
   let latest: LatestDump | null;
   try {
     latest = await latestDump(bucket, { prefix: options.prefix });
   } catch (err) {
-    return { last_ok: null, age_hours: null, warning: `backup freshness unreadable: ${(err instanceof Error ? err.message : String(err)).slice(0, 80)}` };
+    return {
+      last_ok: null,
+      age_hours: null,
+      warning: `backup freshness unreadable: ${(err instanceof Error ? err.message : String(err)).slice(0, 80)}`,
+    };
   }
   if (!latest) return { last_ok: null, age_hours: null, warning: "no complete dump found" };
   return ageOf(latest.exported_at, options.now ?? new Date(), staleHours, "dump");
@@ -107,11 +131,17 @@ export async function backupHealth(
 // The BackupHealth of a stamped time: its age, and a warning past staleHours or when it is not a time.
 export function ageOf(stamp: string, now: Date, staleHours: number, what: string): BackupHealth {
   const stamped = Date.parse(stamp);
-  if (Number.isNaN(stamped)) return { last_ok: stamp, age_hours: null, warning: `the newest ${what}'s time is not parseable: ${String(stamp).slice(0, 40)}` };
+  if (Number.isNaN(stamped))
+    return {
+      last_ok: stamp,
+      age_hours: null,
+      warning: `the newest ${what}'s time is not parseable: ${String(stamp).slice(0, 40)}`,
+    };
   const ageMs = now.getTime() - stamped;
   const ageHours = Math.round((ageMs / 3_600_000) * 10) / 10;
   const result: BackupHealth = { last_ok: stamp, age_hours: ageHours };
-  if (ageMs > staleHours * 3_600_000) result.warning = `last complete ${what} was ${ageHours}h ago, over the ${staleHours}h threshold`;
+  if (ageMs > staleHours * 3_600_000)
+    result.warning = `last complete ${what} was ${ageHours}h ago, over the ${staleHours}h threshold`;
   return result;
 }
 
@@ -156,7 +186,10 @@ function mondayOf(day: string): string {
   return dayOf(ms - ((new Date(ms).getUTCDay() + 6) % 7) * DAY_MS);
 }
 
-function wantedKeys(now: Date, policy: RetentionPolicy): { days: Set<string>; weeks: Set<string>; months: Set<string> } {
+function wantedKeys(
+  now: Date,
+  policy: RetentionPolicy,
+): { days: Set<string>; weeks: Set<string>; months: Set<string> } {
   const today = Date.parse(`${dayOf(now.getTime())}T00:00:00.000Z`);
   const days = new Set<string>();
   for (let k = 0; k < policy.daily; k++) days.add(dayOf(today - k * DAY_MS));
@@ -166,7 +199,11 @@ function wantedKeys(now: Date, policy: RetentionPolicy): { days: Set<string>; we
   const months = new Set<string>();
   const here = new Date(today);
   for (let k = 0; k < policy.monthly; k++) {
-    months.add(new Date(Date.UTC(here.getUTCFullYear(), here.getUTCMonth() - k, 1)).toISOString().slice(0, 7));
+    months.add(
+      new Date(Date.UTC(here.getUTCFullYear(), here.getUTCMonth() - k, 1))
+        .toISOString()
+        .slice(0, 7),
+    );
   }
   return { days, weeks, months };
 }
@@ -240,7 +277,13 @@ export function selectStaleRuns(runs: RunRef[], options: SelectOptions = {}): st
 // delete failure throws.
 export async function pruneDumps(
   bucket: R2Like,
-  options: { prefix?: string; now?: Date; policy?: RetentionPolicy; retentionDays?: number; minKept?: number } = {}
+  options: {
+    prefix?: string;
+    now?: Date;
+    policy?: RetentionPolicy;
+    retentionDays?: number;
+    minKept?: number;
+  } = {},
 ): Promise<PruneResult> {
   const prefix = options.prefix ?? DEFAULT_PREFIX;
   const runs = await runsOf(bucket, prefix);
@@ -251,7 +294,10 @@ export async function pruneDumps(
     const marker = `${prefix}${r.id}/${COMPLETE_MARKER}`;
     try {
       if (r.complete) await bucket.delete(marker);
-      await deleteInChunks(bucket, r.keys.filter((k) => k !== marker));
+      await deleteInChunks(
+        bucket,
+        r.keys.filter((k) => k !== marker),
+      );
     } catch (err) {
       if (!isLockRefusal(err)) throw err;
       locked++;

@@ -36,7 +36,7 @@ export interface BackupResult {
 export class BackupIncomplete extends Error {
   constructor(
     readonly dump: DumpResult,
-    readonly problems: string[]
+    readonly problems: string[],
   ) {
     super(`dump ${dump.run_id} was left incomplete: ${problems.join("; ")}`);
     this.name = "BackupIncomplete";
@@ -45,19 +45,26 @@ export class BackupIncomplete extends Error {
 
 // The checks every site makes: something was dumped, no excluded table is in it, and every
 // required table is. One message per failed check; empty means the dump may be marked complete.
-export function standardProblems(dump: DumpResult, options: { exclude?: string[]; required?: string[] } = {}): string[] {
+export function standardProblems(
+  dump: DumpResult,
+  options: { exclude?: string[]; required?: string[] } = {},
+): string[] {
   const problems: string[] = [];
   const names = new Set(dump.tables.map((t) => t.name));
   const rows = dump.tables.reduce((sum, t) => sum + t.rows, 0);
-  if (dump.tables.length === 0 || rows === 0) problems.push(`the dump holds ${dump.tables.length} tables and ${rows} rows`);
-  for (const name of options.exclude ?? []) if (names.has(name)) problems.push(`${name} is in the dump but must be excluded`);
-  for (const name of options.required ?? []) if (!names.has(name)) problems.push(`${name} is missing from the dump`);
+  if (dump.tables.length === 0 || rows === 0)
+    problems.push(`the dump holds ${dump.tables.length} tables and ${rows} rows`);
+  for (const name of options.exclude ?? [])
+    if (names.has(name)) problems.push(`${name} is in the dump but must be excluded`);
+  for (const name of options.required ?? [])
+    if (!names.has(name)) problems.push(`${name} is missing from the dump`);
   return problems;
 }
 
 // A column name that says it holds a credential, camelCase included: a password, secret, token,
 // API or private key, or the hash of a refresh token or one-time code.
-export const CREDENTIAL_COLUMN = /password|passwd|secret|token|api_?key|credential|private_?key|refresh_?hash|code_?hash/i;
+export const CREDENTIAL_COLUMN =
+  /password|passwd|secret|token|api_?key|credential|private_?key|refresh_?hash|code_?hash/i;
 
 // The column names a CREATE TABLE statement declares, constraints left out.
 export function columnNames(sql: string): string[] {
@@ -91,15 +98,21 @@ export function columnNames(sql: string): string[] {
 export function credentialProblems(
   dump: Pick<DumpResult, "tables">,
   schema: SchemaEntry[],
-  options: { pattern?: RegExp; allow?: Record<string, string> } = {}
+  options: { pattern?: RegExp; allow?: Record<string, string> } = {},
 ): string[] {
   const pattern = options.pattern ?? CREDENTIAL_COLUMN;
   const held = new Set(dump.tables.map((t) => t.name));
   const problems: string[] = [];
   for (const entry of schema) {
-    if (entry.type !== "table" || !held.has(entry.name) || /^\s*CREATE\s+VIRTUAL/i.test(entry.sql)) continue;
-    const found = columnNames(entry.sql).filter((c) => pattern.test(c) && !options.allow?.[`${entry.name}.${c}`]);
-    if (found.length > 0) problems.push(`${entry.name} has credential-looking column(s) ${found.join(", ")} and is in the dump; exclude the table, rename the column or allow it with a reason`);
+    if (entry.type !== "table" || !held.has(entry.name) || /^\s*CREATE\s+VIRTUAL/i.test(entry.sql))
+      continue;
+    const found = columnNames(entry.sql).filter(
+      (c) => pattern.test(c) && !options.allow?.[`${entry.name}.${c}`],
+    );
+    if (found.length > 0)
+      problems.push(
+        `${entry.name} has credential-looking column(s) ${found.join(", ")} and is in the dump; exclude the table, rename the column or allow it with a reason`,
+      );
   }
   return problems;
 }
@@ -115,26 +128,53 @@ async function countProblems(db: D1Like, dump: DumpResult, counted: string[]): P
     const n = live[i]?.results[0]?.n;
     return n === dumped.get(name) ? [] : [`${name} dumped ${dumped.get(name)} rows but has ${n}`];
   });
-  if (counted.every((name) => (dumped.get(name) ?? 0) === 0)) problems.push("every counted table dumped empty");
+  if (counted.every((name) => (dumped.get(name) ?? 0) === 0))
+    problems.push("every counted table dumped empty");
   return problems;
 }
 
 // The nightly backup: dump without the marker, run the standard and the site's checks, then
 // write the marker and prune. Prune runs only after a marker, so a failing night deletes nothing.
-export async function runCheckedBackup(db: D1Like, bucket: R2Like, options: BackupOptions = {}): Promise<BackupResult> {
-  const { required, counted = [], check, retention, excludeIfPresent = [], credentials, ...dumpOptions } = options;
+export async function runCheckedBackup(
+  db: D1Like,
+  bucket: R2Like,
+  options: BackupOptions = {},
+): Promise<BackupResult> {
+  const {
+    required,
+    counted = [],
+    check,
+    retention,
+    excludeIfPresent = [],
+    credentials,
+    ...dumpOptions
+  } = options;
   const plan = excludeIfPresent.length > 0 || credentials ? await readPlan(db) : undefined;
   const present = new Set([...(plan?.tables ?? []), ...(plan?.fts ?? []).map((f) => f.name)]);
-  const exclude = [...new Set([...(dumpOptions.exclude ?? []), ...excludeIfPresent.filter((name) => present.has(name))])];
+  const exclude = [
+    ...new Set([
+      ...(dumpOptions.exclude ?? []),
+      ...excludeIfPresent.filter((name) => present.has(name)),
+    ]),
+  ];
   const dump = await dumpDatabase(db, bucket, { ...dumpOptions, exclude, markComplete: false });
   const problems = [
-    ...standardProblems(dump, { exclude: [...exclude, ...excludeIfPresent], required: [...new Set([...(required ?? []), ...counted])] }),
-    ...(credentials && plan ? credentialProblems(dump, plan.schema, credentials === true ? {} : credentials) : []),
+    ...standardProblems(dump, {
+      exclude: [...exclude, ...excludeIfPresent],
+      required: [...new Set([...(required ?? []), ...counted])],
+    }),
+    ...(credentials && plan
+      ? credentialProblems(dump, plan.schema, credentials === true ? {} : credentials)
+      : []),
     ...(await countProblems(db, dump, counted)),
     ...((await check?.(dump)) ?? []),
   ];
   if (problems.length > 0) throw new BackupIncomplete(dump, problems);
   await writeCompleteMarker(bucket, dump);
-  const pruned = await pruneDumps(bucket, { prefix: dumpOptions.prefix, now: dumpOptions.now, ...retention });
+  const pruned = await pruneDumps(bucket, {
+    prefix: dumpOptions.prefix,
+    now: dumpOptions.now,
+    ...retention,
+  });
   return { dump, pruned };
 }

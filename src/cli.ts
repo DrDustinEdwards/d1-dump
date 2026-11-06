@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 import { cloudflareScratch } from "./cloudflare.js";
 import { runRestoreDrill } from "./drill.js";
-import { directoryBucket, drillFilesFromBucket, drillFromBucket, pickBackend, sqliteScratch } from "./node.js";
+import {
+  directoryBucket,
+  drillFilesFromBucket,
+  drillFromBucket,
+  pickBackend,
+  sqliteScratch,
+} from "./node.js";
 
 const USAGE = `usage: d1-dump drill --dir <downloaded dump root> [--backend sqlite|d1] [--prefix <backups/json/run id/>] [--max-age-hours <n|off>]
        d1-dump drill --bucket <bucket name> [--prefix <backups/json/>] [--backend sqlite|d1] [--max-age-hours <n|off>]
@@ -35,12 +41,25 @@ async function main(args: string[]): Promise<number> {
       return a === "--name" && next ? [next] : [];
     });
     const sample = arg(args, "--sample");
-    const { code, lines } = await drillFilesFromBucket({ accountId, apiToken: token, bucket, names, sample: sample === undefined ? undefined : Number(sample) });
+    const { code, lines } = await drillFilesFromBucket({
+      accountId,
+      apiToken: token,
+      bucket,
+      names,
+      sample: sample === undefined ? undefined : Number(sample),
+    });
     for (const line of lines) console.log(line);
     return code;
   }
   if (args[0] === "drill" && bucket && !dir) {
-    const { code, lines } = await drillFromBucket({ accountId, apiToken: token, bucket, prefix: arg(args, "--prefix"), backend: arg(args, "--backend"), maxAgeHours: maxAge(args) });
+    const { code, lines } = await drillFromBucket({
+      accountId,
+      apiToken: token,
+      bucket,
+      prefix: arg(args, "--prefix"),
+      backend: arg(args, "--backend"),
+      maxAgeHours: maxAge(args),
+    });
     for (const line of lines) console.log(line);
     return code;
   }
@@ -54,11 +73,16 @@ async function main(args: string[]): Promise<number> {
   console.log(`backend: ${backend} (${why})`);
   const result = await runRestoreDrill(directoryBucket(dir), {
     // pickBackend gives d1 only when both credentials are set.
-    createScratch: backend === "d1" && accountId && token ? cloudflareScratch(accountId, token) : sqliteScratch(),
+    createScratch:
+      backend === "d1" && accountId && token
+        ? cloudflareScratch(accountId, token)
+        : sqliteScratch(),
     prefix: arg(args, "--prefix"),
     maxAgeHours: maxAge(args),
   });
-  console.log(`restore drill ${result.ok ? "PASSED" : "FAILED"}: ${result.run ?? "no dump"} into ${result.scratch} (${backend})`);
+  console.log(
+    `restore drill ${result.ok ? "PASSED" : "FAILED"}: ${result.run ?? "no dump"} into ${result.scratch} (${backend})`,
+  );
   for (const c of result.checks) console.log(`  ${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`);
   return result.ok ? 0 : 1;
 }
@@ -68,5 +92,5 @@ main(process.argv.slice(2)).then(
   (err: unknown) => {
     console.error(`d1-dump: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
-  }
+  },
 );

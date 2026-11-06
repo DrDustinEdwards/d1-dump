@@ -1,4 +1,9 @@
-import { COMPLETE_MARKER, SCHEMA_SIDECAR, type CompleteMarker, type SchemaSidecar } from "./dump.js";
+import {
+  COMPLETE_MARKER,
+  SCHEMA_SIDECAR,
+  type CompleteMarker,
+  type SchemaSidecar,
+} from "./dump.js";
 import { readDumpJson } from "./gzip.js";
 import { quoteIdent } from "./schema.js";
 import type { D1Like, D1Statement, R2Like } from "./types.js";
@@ -38,15 +43,22 @@ function readJson<T>(bucket: R2Like, key: string): Promise<T> {
 // The columns the restored table has, from the CREATE statement in _schema.json that was
 // just run. An internal FTS5 table is dumped with its rowid too.
 async function schemaColumns(db: D1Like, table: string, internalFts: boolean): Promise<string[]> {
-  const { results } = await db.prepare(`PRAGMA table_info(${quoteIdent(table)})`).all<{ name: string }>();
+  const { results } = await db
+    .prepare(`PRAGMA table_info(${quoteIdent(table)})`)
+    .all<{ name: string }>();
   const columns = results.map((c) => c.name);
-  if (columns.length === 0) throw new Error(`d1-dump: ${table} has no columns after its CREATE statement ran`);
+  if (columns.length === 0)
+    throw new Error(`d1-dump: ${table} has no columns after its CREATE statement ran`);
   return internalFts ? ["rowid", ...columns] : columns;
 }
 
 // Every row must carry exactly the schema's columns. Comparing to the first row instead
 // would pass a column missing from all of them, which restores as NULL or as a default.
-function checkColumns(table: string, columns: string[], rows: Array<Record<string, unknown>>): void {
+function checkColumns(
+  table: string,
+  columns: string[],
+  rows: Array<Record<string, unknown>>,
+): void {
   const expected = new Set(columns);
   for (let i = 0; i < rows.length; i++) {
     const keys = Object.keys(rows[i]);
@@ -54,7 +66,7 @@ function checkColumns(table: string, columns: string[], rows: Array<Record<strin
     const lacks = columns.filter((c) => !(c in rows[i]));
     const extra = keys.filter((k) => !expected.has(k));
     throw new Error(
-      `d1-dump: ${table} row ${i} does not match the schema's columns (lacks: ${lacks.join(", ") || "none"}; not in the schema: ${extra.join(", ") || "none"})`
+      `d1-dump: ${table} row ${i} does not match the schema's columns (lacks: ${lacks.join(", ") || "none"}; not in the schema: ${extra.join(", ") || "none"})`,
     );
   }
 }
@@ -63,11 +75,20 @@ function checkColumns(table: string, columns: string[], rows: Array<Record<strin
 // first, then the rows (parents before children), then each external FTS5 index is
 // rebuilt, then indexes, triggers and views, so no trigger fires on restored rows.
 // Every table's count is checked against the marker, and a mismatch throws.
-export async function restoreDump(db: D1Like, bucket: R2Like, runPrefix: string, options: RestoreOptions = {}): Promise<RestoreResult> {
+export async function restoreDump(
+  db: D1Like,
+  bucket: R2Like,
+  runPrefix: string,
+  options: RestoreOptions = {},
+): Promise<RestoreResult> {
   const prefix = runPrefix.endsWith("/") ? runPrefix : `${runPrefix}/`;
-  const marker = await readJson<CompleteMarker>(bucket, `${prefix}${COMPLETE_MARKER}`).catch((err: Error) => {
-    throw new Error(`d1-dump: ${prefix} has no readable ${COMPLETE_MARKER}, so it is not a complete dump (${err.message})`);
-  });
+  const marker = await readJson<CompleteMarker>(bucket, `${prefix}${COMPLETE_MARKER}`).catch(
+    (err: Error) => {
+      throw new Error(
+        `d1-dump: ${prefix} has no readable ${COMPLETE_MARKER}, so it is not a complete dump (${err.message})`,
+      );
+    },
+  );
   const { schema } = await readJson<SchemaSidecar>(bucket, `${prefix}${SCHEMA_SIDECAR}`);
   const batchRows = options.batchRows ?? DEFAULT_BATCH_ROWS;
   const batchBytes = options.batchBytes ?? DEFAULT_BATCH_BYTES;
@@ -78,11 +99,17 @@ export async function restoreDump(db: D1Like, bucket: R2Like, runPrefix: string,
   const restored: RestoreResult["tables"] = [];
   for (const table of marker.tables) {
     const { rows } = await readJson<{ rows: Array<Record<string, unknown>> }>(bucket, table.key);
-    if (rows.length !== table.rows) throw new Error(`d1-dump: ${table.key} holds ${rows.length} rows, the marker says ${table.rows}`);
+    if (rows.length !== table.rows)
+      throw new Error(
+        `d1-dump: ${table.key} holds ${rows.length} rows, the marker says ${table.rows}`,
+      );
     if (rows.length > 0) {
       const columns = await schemaColumns(db, table.name, internalFts.has(table.name));
       checkColumns(table.name, columns, rows);
-      if (columns.length > D1_MAX_PARAMS) throw new Error(`d1-dump: ${table.name} has ${columns.length} columns, over D1's ${D1_MAX_PARAMS} bound parameters`);
+      if (columns.length > D1_MAX_PARAMS)
+        throw new Error(
+          `d1-dump: ${table.name} has ${columns.length} columns, over D1's ${D1_MAX_PARAMS} bound parameters`,
+        );
       const sql = `INSERT INTO ${quoteIdent(table.name)} (${columns.map(quoteIdent).join(", ")}) VALUES (${columns.map((_, i) => `?${i + 1}`).join(", ")})`;
       let statements: D1Statement[] = [];
       let bytes = 0;
@@ -100,8 +127,13 @@ export async function restoreDump(db: D1Like, bucket: R2Like, runPrefix: string,
       }
       await flush();
     }
-    const { results } = await db.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(table.name)}`).all<{ n: number }>();
-    if (results[0]?.n !== table.rows) throw new Error(`d1-dump: ${table.name} restored ${results[0]?.n} rows, the dump holds ${table.rows}`);
+    const { results } = await db
+      .prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(table.name)}`)
+      .all<{ n: number }>();
+    if (results[0]?.n !== table.rows)
+      throw new Error(
+        `d1-dump: ${table.name} restored ${results[0]?.n} rows, the dump holds ${table.rows}`,
+      );
     restored.push({ name: table.name, rows: table.rows });
   }
 
@@ -109,7 +141,9 @@ export async function restoreDump(db: D1Like, bucket: R2Like, runPrefix: string,
   const empty: string[] = [];
   for (const f of marker.fts) {
     if (f.mode === "external") {
-      await db.prepare(`INSERT INTO ${quoteIdent(f.name)} (${quoteIdent(f.name)}) VALUES ('rebuild')`).run();
+      await db
+        .prepare(`INSERT INTO ${quoteIdent(f.name)} (${quoteIdent(f.name)}) VALUES ('rebuild')`)
+        .run();
       rebuilt.push(f.name);
     } else if (f.mode === "contentless") {
       empty.push(f.name);
