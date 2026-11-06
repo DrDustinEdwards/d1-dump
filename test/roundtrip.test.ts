@@ -1,6 +1,23 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { COMPLETE_MARKER, dumpDatabase, readPlan, restoreDump, writeCompleteMarker, type D1Like, type R2Like } from "../src/index.js";
-import { SITE_ROWS, SITE_SCHEMA, exec, readBytes, readText, rows, sandbox, tableKey } from "./helpers.js";
+import {
+  COMPLETE_MARKER,
+  dumpDatabase,
+  readPlan,
+  restoreDump,
+  writeCompleteMarker,
+  type D1Like,
+  type R2Like,
+} from "../src/index.js";
+import {
+  SITE_ROWS,
+  SITE_SCHEMA,
+  exec,
+  readBytes,
+  readText,
+  rows,
+  sandbox,
+  tableKey,
+} from "./helpers.js";
 
 let src: D1Like;
 let dst: D1Like;
@@ -18,7 +35,12 @@ const NOW = new Date("2026-09-27T09:00:00.000Z");
 test("every table is dumped, FTS5 shadow tables are not, and each FTS5 table is classified", async () => {
   const result = await dumpDatabase(src, bucket, { now: NOW });
   expect(result.tables.map((t) => [t.name, t.rows]).sort()).toEqual(
-    [["comments", 3], ["glossary", 2], ["posts", 2], ["settings", 2]].sort()
+    [
+      ["comments", 3],
+      ["glossary", 2],
+      ["posts", 2],
+      ["settings", 2],
+    ].sort(),
   );
   expect(result.fts).toEqual([
     { name: "posts_fts", mode: "external", content: "posts" },
@@ -27,7 +49,8 @@ test("every table is dumped, FTS5 shadow tables are not, and each FTS5 table is 
   ]);
   // The shadow tables exist in the source, and none of them was written.
   expect(result.shadow_skipped.length).toBeGreaterThanOrEqual(12);
-  for (const shadow of result.shadow_skipped) expect(result.keys.some((k) => k.endsWith(`/${shadow}.json`))).toBe(false);
+  for (const shadow of result.shadow_skipped)
+    expect(result.keys.some((k) => k.endsWith(`/${shadow}.json`))).toBe(false);
   expect(result.keys.at(-1)).toBe(`backups/json/2026-09-27T09-00-00-000Z/${COMPLETE_MARKER}`);
 });
 
@@ -46,54 +69,93 @@ test("a dump restored into a scratch database matches the source, row for row", 
     expect(await rows(dst, sql)).toEqual(await rows(src, sql));
   }
   // Search works on the copy: the external index rebuilt, the internal one restored.
-  expect(await rows(dst, "SELECT rowid FROM posts_fts WHERE posts_fts MATCH 'guide'")).toEqual([{ rowid: 1 }]);
-  expect(await rows(dst, "SELECT rowid FROM glossary WHERE glossary MATCH 'published'")).toEqual([{ rowid: 7 }]);
+  expect(await rows(dst, "SELECT rowid FROM posts_fts WHERE posts_fts MATCH 'guide'")).toEqual([
+    { rowid: 1 },
+  ]);
+  expect(await rows(dst, "SELECT rowid FROM glossary WHERE glossary MATCH 'published'")).toEqual([
+    { rowid: 7 },
+  ]);
   // Triggers were created after the rows, and work on new ones.
   await exec(dst, ["INSERT INTO posts (slug, body) VALUES ('third', 'annual report')"]);
-  expect(await rows(dst, "SELECT rowid FROM posts_fts WHERE posts_fts MATCH 'annual'")).toEqual([{ rowid: 3 }]);
+  expect(await rows(dst, "SELECT rowid FROM posts_fts WHERE posts_fts MATCH 'annual'")).toEqual([
+    { rowid: 3 },
+  ]);
   // AUTOINCREMENT carried on from the restored ids rather than restarting.
   expect(await rows(dst, "SELECT id FROM posts WHERE slug = 'third'")).toEqual([{ id: 3 }]);
 });
 
 // 9.6 MB in six rows, over one 8 MiB part. Few large rows rather than many small ones,
 // because Miniflare on Windows writes many rows slowly (1200 rows took a minute).
-test("a large append-only table is paged and streamed as a multipart object, and restores whole", { timeout: 180_000 }, async () => {
-  await exec(src, ["CREATE TABLE audit (id INTEGER PRIMARY KEY AUTOINCREMENT, detail TEXT)"]);
-  const detail = "x".repeat(1_600_000);
-  for (let i = 0; i < 6; i++) await src.prepare("INSERT INTO audit (detail) VALUES (?1)").bind(detail).run();
-  const dumped = await dumpDatabase(src, bucket, { now: NOW, paged: { audit: { idColumn: "id", pageRows: 2 } } });
-  expect(dumped.tables.find((t) => t.name === "audit")?.rows).toBe(6);
-  const restored = await restoreDump(dst, bucket, dumped.prefix, { batchRows: 1 });
-  expect(restored.tables.find((t) => t.name === "audit")?.rows).toBe(6);
-  expect(await rows(dst, "SELECT MIN(id) AS lo, MAX(id) AS hi, SUM(length(detail)) AS bytes FROM audit")).toEqual([{ lo: 1, hi: 6, bytes: 9_600_000 }]);
-});
+test(
+  "a large append-only table is paged and streamed as a multipart object, and restores whole",
+  { timeout: 180_000 },
+  async () => {
+    await exec(src, ["CREATE TABLE audit (id INTEGER PRIMARY KEY AUTOINCREMENT, detail TEXT)"]);
+    const detail = "x".repeat(1_600_000);
+    for (let i = 0; i < 6; i++)
+      await src.prepare("INSERT INTO audit (detail) VALUES (?1)").bind(detail).run();
+    const dumped = await dumpDatabase(src, bucket, {
+      now: NOW,
+      paged: { audit: { idColumn: "id", pageRows: 2 } },
+    });
+    expect(dumped.tables.find((t) => t.name === "audit")?.rows).toBe(6);
+    const restored = await restoreDump(dst, bucket, dumped.prefix, { batchRows: 1 });
+    expect(restored.tables.find((t) => t.name === "audit")?.rows).toBe(6);
+    expect(
+      await rows(
+        dst,
+        "SELECT MIN(id) AS lo, MAX(id) AS hi, SUM(length(detail)) AS bytes FROM audit",
+      ),
+    ).toEqual([{ lo: 1, hi: 6, bytes: 9_600_000 }]);
+  },
+);
 
 // compress writes each table as gzip under a .gz key, whole tables and streamed ones alike, and
 // the same restore reads it. The rows are random digits so the archive is not trivially small.
-test("a compressed dump is smaller, restores row for row, and sits beside a plain run", { timeout: 180_000 }, async () => {
-  await exec(src, ["CREATE TABLE audit (id INTEGER PRIMARY KEY AUTOINCREMENT, detail TEXT)"]);
-  for (let i = 0; i < 40; i++) await src.prepare("INSERT INTO audit (detail) VALUES (?1)").bind(`row ${i} ` + "0123456789".repeat(2000)).run();
-  const paged = { audit: { idColumn: "id", pageRows: 7 } };
-  const plain = await dumpDatabase(src, bucket, { now: NOW, paged });
-  const packed = await dumpDatabase(src, bucket, { now: new Date("2026-09-28T09:00:00.000Z"), paged, compress: true });
+test(
+  "a compressed dump is smaller, restores row for row, and sits beside a plain run",
+  { timeout: 180_000 },
+  async () => {
+    await exec(src, ["CREATE TABLE audit (id INTEGER PRIMARY KEY AUTOINCREMENT, detail TEXT)"]);
+    for (let i = 0; i < 40; i++)
+      await src
+        .prepare("INSERT INTO audit (detail) VALUES (?1)")
+        .bind(`row ${i} ` + "0123456789".repeat(2000))
+        .run();
+    const paged = { audit: { idColumn: "id", pageRows: 7 } };
+    const plain = await dumpDatabase(src, bucket, { now: NOW, paged });
+    const packed = await dumpDatabase(src, bucket, {
+      now: new Date("2026-09-28T09:00:00.000Z"),
+      paged,
+      compress: true,
+    });
 
-  expect(packed.tables.every((t) => t.key.endsWith(`/${t.name}.json.gz`))).toBe(true);
-  expect(plain.tables.every((t) => t.key.endsWith(`/${t.name}.json`))).toBe(true);
-  const size = async (key: string) => (await readBytes(bucket, key)).byteLength;
-  const auditKey = (r: typeof plain) => tableKey(r, "audit");
-  expect(await size(auditKey(packed))).toBeLessThan((await size(auditKey(plain))) / 4);
-  // Gzip bytes, not JSON text, are what the object holds.
-  expect(new Uint8Array(await readBytes(bucket, auditKey(packed))).slice(0, 2)).toEqual(new Uint8Array([0x1f, 0x8b]));
+    expect(packed.tables.every((t) => t.key.endsWith(`/${t.name}.json.gz`))).toBe(true);
+    expect(plain.tables.every((t) => t.key.endsWith(`/${t.name}.json`))).toBe(true);
+    const size = async (key: string) => (await readBytes(bucket, key)).byteLength;
+    const auditKey = (r: typeof plain) => tableKey(r, "audit");
+    expect(await size(auditKey(packed))).toBeLessThan((await size(auditKey(plain))) / 4);
+    // Gzip bytes, not JSON text, are what the object holds.
+    expect(new Uint8Array(await readBytes(bucket, auditKey(packed))).slice(0, 2)).toEqual(
+      new Uint8Array([0x1f, 0x8b]),
+    );
 
-  const restored = await restoreDump(dst, bucket, packed.prefix);
-  expect(restored.rebuilt).toEqual(["posts_fts"]);
-  for (const sql of ["SELECT id, slug, body, hex(cover) AS cover FROM posts ORDER BY id", "SELECT * FROM comments ORDER BY id", "SELECT * FROM audit ORDER BY id"]) {
-    expect(await rows(dst, sql)).toEqual(await rows(src, sql));
-  }
-  // The plain run still restores with the same code.
-  const dst2 = (await sandbox()).dst;
-  expect((await restoreDump(dst2, bucket, plain.prefix)).tables.find((t) => t.name === "audit")?.rows).toBe(40);
-});
+    const restored = await restoreDump(dst, bucket, packed.prefix);
+    expect(restored.rebuilt).toEqual(["posts_fts"]);
+    for (const sql of [
+      "SELECT id, slug, body, hex(cover) AS cover FROM posts ORDER BY id",
+      "SELECT * FROM comments ORDER BY id",
+      "SELECT * FROM audit ORDER BY id",
+    ]) {
+      expect(await rows(dst, sql)).toEqual(await rows(src, sql));
+    }
+    // The plain run still restores with the same code.
+    const dst2 = (await sandbox()).dst;
+    expect(
+      (await restoreDump(dst2, bucket, plain.prefix)).tables.find((t) => t.name === "audit")?.rows,
+    ).toBe(40);
+  },
+);
 
 test("a failed write leaves no marker, so the run is not a complete dump", async () => {
   let puts = 0;
@@ -112,7 +174,9 @@ test("a failed write leaves no marker, so the run is not a complete dump", async
   const listed = (await bucket.list({ prefix: "backups/json/" })).objects.map((o) => o.key);
   expect(listed.length).toBeGreaterThan(0);
   expect(listed.some((k) => k.endsWith(COMPLETE_MARKER))).toBe(false);
-  await expect(restoreDump(dst, bucket, "backups/json/2026-09-27T09-00-00-000Z/")).rejects.toThrow(/not a complete dump/);
+  await expect(restoreDump(dst, bucket, "backups/json/2026-09-27T09-00-00-000Z/")).rejects.toThrow(
+    /not a complete dump/,
+  );
 });
 
 test("a restore whose table file lost rows is refused", async () => {
@@ -121,30 +185,55 @@ test("a restore whose table file lost rows is refused", async () => {
   const file = JSON.parse(await readText(bucket, key));
   file.rows.pop();
   await bucket.put(key, JSON.stringify(file));
-  await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(/comments\.json holds 2 rows, the marker says 3/);
+  await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(
+    /comments\.json holds 2 rows, the marker says 3/,
+  );
 });
 
 test("options that name no table are refused, so an exclude list cannot rot", async () => {
-  await expect(dumpDatabase(src, bucket, { exclude: ["no_such_table"] })).rejects.toThrow(/no_such_table is named in the options/);
-  await expect(dumpDatabase(src, bucket, { paged: { gone: { idColumn: "id", pageRows: 10 } } })).rejects.toThrow(/gone is named/);
+  await expect(dumpDatabase(src, bucket, { exclude: ["no_such_table"] })).rejects.toThrow(
+    /no_such_table is named in the options/,
+  );
+  await expect(
+    dumpDatabase(src, bucket, { paged: { gone: { idColumn: "id", pageRows: 10 } } }),
+  ).rejects.toThrow(/gone is named/);
   const dumped = await dumpDatabase(src, bucket, { now: NOW, exclude: ["settings"] });
   expect(dumped.tables.map((t) => t.name)).not.toContain("settings");
 });
 
 test("a paged table must stream every row the snapshot held, and a page size must be at least 1", async () => {
-  await exec(src, ["CREATE TABLE events (id INTEGER, body TEXT)", "INSERT INTO events VALUES (1, 'a'), (2, 'b'), (2, 'c'), (3, 'd')"]);
+  await exec(src, [
+    "CREATE TABLE events (id INTEGER, body TEXT)",
+    "INSERT INTO events VALUES (1, 'a'), (2, 'b'), (2, 'c'), (3, 'd')",
+  ]);
   // id 2 repeats, so the page after (2, 'b') starts past it and (2, 'c') is never read.
-  await expect(dumpDatabase(src, bucket, { now: NOW, paged: { events: { idColumn: "id", pageRows: 2 } } })).rejects.toThrow(/events paged 3 rows but held 4/);
-  await expect(dumpDatabase(src, bucket, { now: NOW, paged: { events: { idColumn: "id", pageRows: 0 } } })).rejects.toThrow(/pageRows must be a whole number/);
-  expect(await bucket.list({ prefix: "" }).then((l) => l.objects.filter((o) => o.key.endsWith(COMPLETE_MARKER)))).toEqual([]);
+  await expect(
+    dumpDatabase(src, bucket, { now: NOW, paged: { events: { idColumn: "id", pageRows: 2 } } }),
+  ).rejects.toThrow(/events paged 3 rows but held 4/);
+  await expect(
+    dumpDatabase(src, bucket, { now: NOW, paged: { events: { idColumn: "id", pageRows: 0 } } }),
+  ).rejects.toThrow(/pageRows must be a whole number/);
+  expect(
+    await bucket
+      .list({ prefix: "" })
+      .then((l) => l.objects.filter((o) => o.key.endsWith(COMPLETE_MARKER))),
+  ).toEqual([]);
 });
 
 test("sidecars are written before the marker and listed in it", async () => {
-  const dumped = await dumpDatabase(src, bucket, { now: NOW, sidecars: { kv: { keys: { mode: "off" } } } });
+  const dumped = await dumpDatabase(src, bucket, {
+    now: NOW,
+    sidecars: { kv: { keys: { mode: "off" } } },
+  });
   const marker = JSON.parse(await readText(bucket, `${dumped.prefix}${COMPLETE_MARKER}`));
   expect(marker.keys).toContain(`${dumped.prefix}_kv.json`);
-  expect(JSON.parse(await readText(bucket, `${dumped.prefix}_kv.json`))).toEqual({ exported_at: NOW.toISOString(), keys: { mode: "off" } });
-  await expect(dumpDatabase(src, bucket, { sidecars: { complete: {} } })).rejects.toThrow(/reserved/);
+  expect(JSON.parse(await readText(bucket, `${dumped.prefix}_kv.json`))).toEqual({
+    exported_at: NOW.toISOString(),
+    keys: { mode: "off" },
+  });
+  await expect(dumpDatabase(src, bucket, { sidecars: { complete: {} } })).rejects.toThrow(
+    /reserved/,
+  );
 });
 
 test("markComplete: false writes every object but the marker, and writeCompleteMarker completes the run once", async () => {

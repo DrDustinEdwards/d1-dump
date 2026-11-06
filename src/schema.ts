@@ -61,7 +61,9 @@ function parentsFirst(tables: SchemaEntry[]): string[] {
   const deps = new Map<string, Set<string>>();
   for (const t of tables) {
     const refs = new Set<string>();
-    for (const m of t.sql.matchAll(/\bREFERENCES\s+(?:"((?:[^"]|"")+)"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_]\w*))/gi)) {
+    for (const m of t.sql.matchAll(
+      /\bREFERENCES\s+(?:"((?:[^"]|"")+)"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_]\w*))/gi,
+    )) {
       const ref = (m[1] ?? m[2] ?? m[3] ?? m[4]).replace(/""/g, '"');
       if (ref !== t.name && names.has(ref)) refs.add(ref);
     }
@@ -87,7 +89,9 @@ function parentsFirst(tables: SchemaEntry[]): string[] {
 
 export async function readPlan(db: D1Like): Promise<Plan> {
   const { results } = await db
-    .prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY rowid")
+    .prepare(
+      "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY rowid",
+    )
     .all<SchemaEntry>();
   const entries = results.filter((e) => !isInternal(e.name) && !isInternal(e.tbl_name));
 
@@ -97,12 +101,17 @@ export async function readPlan(db: D1Like): Promise<Plan> {
     if (e.type !== "table" || !/^\s*CREATE\s+VIRTUAL\s+TABLE/i.test(e.sql)) continue;
     // Any other virtual table (rtree, fts3, fts4) is refused rather than skipped: the
     // dump would otherwise report success without it.
-    if (!/\bUSING\s+fts5\s*\(/i.test(e.sql)) throw new Error(`d1-dump: ${e.name} is a virtual table that is not FTS5; this package dumps FTS5 only`);
+    if (!/\bUSING\s+fts5\s*\(/i.test(e.sql))
+      throw new Error(
+        `d1-dump: ${e.name} is a virtual table that is not FTS5; this package dumps FTS5 only`,
+      );
     fts.push({ name: e.name, ...ftsMode(e.sql) });
     for (const suffix of FTS5_SHADOW_SUFFIXES) shadow.add(e.name + suffix);
   }
   const ftsNames = new Set(fts.map((f) => f.name));
-  const schema = entries.filter((e) => !shadow.has(e.name) && !(e.type !== "table" && shadow.has(e.tbl_name)));
+  const schema = entries.filter(
+    (e) => !shadow.has(e.name) && !(e.type !== "table" && shadow.has(e.tbl_name)),
+  );
   const ordinary = schema.filter((e) => e.type === "table" && !ftsNames.has(e.name));
   return {
     tables: parentsFirst(ordinary),

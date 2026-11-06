@@ -43,7 +43,14 @@ export {
 } from "./runs.js";
 export { readDumpJson } from "./gzip.js";
 export { readPlan, type FtsMode, type FtsTable, type Plan, type SchemaEntry } from "./schema.js";
-export type { D1Like, D1Statement, R2FilesLike, R2HttpMetadataLike, R2Like, R2ObjectLike } from "./types.js";
+export type {
+  D1Like,
+  D1Statement,
+  R2FilesLike,
+  R2HttpMetadataLike,
+  R2Like,
+  R2ObjectLike,
+} from "./types.js";
 export {
   DEFAULT_KEEP_DELETED_DAYS,
   DEFAULT_MAX_OBJECTS,

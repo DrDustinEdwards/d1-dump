@@ -4,22 +4,19 @@
   "private": true,
   "description": "A per-table D1 dump into the site's own R2 bucket, which works where wrangler d1 export fails on FTS5, with a restore and a backup-age reading for health.",
   "license": "MIT",
-  "type": "module",
-  "engines": {
-    "node": ">=24.14.1"
-  },
   "bin": {
     "d1-dump": "./dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepare": "npm run build",
@@ -40,6 +37,9 @@
     "oxlint-tsgolint": "7.0.2006",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
+  },
+  "engines": {
+    "node": ">=24.14.1"
   },
   "allowScripts": {
     "workerd": false

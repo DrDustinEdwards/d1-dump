@@ -4,8 +4,26 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { cloudflareScratch } from "../src/cloudflare.js";
 import { directoryBucket, drillFilesFromBucket, drillFromBucket, pathInside } from "../src/node.js";
-import { D1_MAX_STATEMENT_BYTES, dumpDatabase, guardStatements, runRestoreDrill, scratchName, type D1Like, type R2FilesLike, type R2Like } from "../src/index.js";
-import { SITE_ROWS, SITE_SCHEMA, checkOf, exec, readText, rows, sandbox, statsOf } from "./helpers.js";
+import {
+  D1_MAX_STATEMENT_BYTES,
+  dumpDatabase,
+  guardStatements,
+  runRestoreDrill,
+  scratchName,
+  type D1Like,
+  type R2FilesLike,
+  type R2Like,
+} from "../src/index.js";
+import {
+  SITE_ROWS,
+  SITE_SCHEMA,
+  checkOf,
+  exec,
+  readText,
+  rows,
+  sandbox,
+  statsOf,
+} from "./helpers.js";
 
 let src: D1Like;
 let dst: D1Like;
@@ -49,7 +67,15 @@ test("a good dump passes every check, and the scratch database is deleted", asyn
   expect(result.ok).toBe(true);
   expect(result.scratch).toBe("restore-drill-2026-09-27-4242");
   expect(scratch.state).toEqual({ names: ["restore-drill-2026-09-27-4242"], deleted: 1 });
-  expect(result.checks.map((c) => c.name)).toEqual(["dump", "restore", "counts", "fts", "search", "statements", "scratch"]);
+  expect(result.checks.map((c) => c.name)).toEqual([
+    "dump",
+    "restore",
+    "counts",
+    "fts",
+    "search",
+    "statements",
+    "scratch",
+  ]);
   // Each check says what it read, so "ok" cannot mean "read nothing".
   expect(checkOf(result, "counts").detail).toMatch(/4 tables, 9 rows/);
   expect(checkOf(result, "fts").detail).toMatch(/3 FTS5 tables, 4 indexed documents/);
@@ -60,38 +86,51 @@ test("a good dump passes every check, and the scratch database is deleted", asyn
 // The case that broke dustinedwards-info #347 (merge b692758f): wrangler's SQL export wrote
 // a 141 KB paper as one literal INSERT, over D1's 100 KB statement cap. The JSON dump
 // binds each value, so the same row goes in as a short statement.
-test("a 141 KB value with newlines and quotes restores byte for byte, and no statement sent is over the cap", { timeout: 120_000 }, async () => {
-  const paper = ("Release summary: it's 'quoted' \"twice\"\nline two\r\nline three\\n\n" + "update ".repeat(40)).repeat(420);
-  expect(new TextEncoder().encode(paper).length).toBeGreaterThan(141_000);
-  const big = "field note\n".repeat(140_000);
-  await exec(src, ["CREATE TABLE papers (id INTEGER PRIMARY KEY, body TEXT)"]);
-  await src.prepare("INSERT INTO papers (body) VALUES (?1)").bind(paper).run();
-  await src.prepare("INSERT INTO papers (body) VALUES (?1)").bind(big).run();
-  await dumpDatabase(src, bucket, { now: NOW });
+test(
+  "a 141 KB value with newlines and quotes restores byte for byte, and no statement sent is over the cap",
+  { timeout: 120_000 },
+  async () => {
+    const paper = (
+      "Release summary: it's 'quoted' \"twice\"\nline two\r\nline three\\n\n" + "update ".repeat(40)
+    ).repeat(420);
+    expect(new TextEncoder().encode(paper).length).toBeGreaterThan(141_000);
+    const big = "field note\n".repeat(140_000);
+    await exec(src, ["CREATE TABLE papers (id INTEGER PRIMARY KEY, body TEXT)"]);
+    await src.prepare("INSERT INTO papers (body) VALUES (?1)").bind(paper).run();
+    await src.prepare("INSERT INTO papers (body) VALUES (?1)").bind(big).run();
+    await dumpDatabase(src, bucket, { now: NOW });
 
-  // The cap is live in this environment: the same 141 KB value as a literal is refused.
-  await expect(dst.prepare(`INSERT INTO settings (k, v) VALUES ('x', '${"y".repeat(141_000)}')`).run()).rejects.toThrow(/statement too long|SQLITE_TOOBIG/);
+    // The cap is live in this environment: the same 141 KB value as a literal is refused.
+    await expect(
+      dst.prepare(`INSERT INTO settings (k, v) VALUES ('x', '${"y".repeat(141_000)}')`).run(),
+    ).rejects.toThrow(/statement too long|SQLITE_TOOBIG/);
 
-  const result = await runRestoreDrill(bucket, { ...scratchOf(dst), now: LATER, pid: 1 });
-  expect(result.checks.filter((c) => !c.ok)).toEqual([]);
-  expect(await rows(dst, "SELECT id, body FROM papers ORDER BY id")).toEqual([
-    { id: 1, body: paper },
-    { id: 2, body: big },
-  ]);
-  const stats = statsOf(result);
-  expect(stats.maxStatementBytes).toBeLessThan(D1_MAX_STATEMENT_BYTES);
-  expect(stats.maxBoundValue).toBe(big.length);
-  expect(stats.maxBoundValue).toBeGreaterThan(1_000_000);
-  // Rows of that size are sent a batch each, not a hundred to a request.
-  expect(stats.maxBatchBound).toBeLessThan(2 * big.length);
-});
+    const result = await runRestoreDrill(bucket, { ...scratchOf(dst), now: LATER, pid: 1 });
+    expect(result.checks.filter((c) => !c.ok)).toEqual([]);
+    expect(await rows(dst, "SELECT id, body FROM papers ORDER BY id")).toEqual([
+      { id: 1, body: paper },
+      { id: 2, body: big },
+    ]);
+    const stats = statsOf(result);
+    expect(stats.maxStatementBytes).toBeLessThan(D1_MAX_STATEMENT_BYTES);
+    expect(stats.maxBoundValue).toBe(big.length);
+    expect(stats.maxBoundValue).toBeGreaterThan(1_000_000);
+    // Rows of that size are sent a batch each, not a hundred to a request.
+    expect(stats.maxBatchBound).toBeLessThan(2 * big.length);
+  },
+);
 
 test("the guard throws on a statement over the cap before it reaches the database", async () => {
   const sent: string[] = [];
-  const spy: D1Like = { prepare: (sql) => (sent.push(sql), dst.prepare(sql)), batch: (s) => dst.batch(s) };
+  const spy: D1Like = {
+    prepare: (sql) => (sent.push(sql), dst.prepare(sql)),
+    batch: (s) => dst.batch(s),
+  };
   const { db, stats } = guardStatements(spy);
   db.prepare("SELECT 1");
-  expect(() => db.prepare(`SELECT '${"y".repeat(D1_MAX_STATEMENT_BYTES)}'`)).toThrow(/over D1's 100000 byte cap and was not sent/);
+  expect(() => db.prepare(`SELECT '${"y".repeat(D1_MAX_STATEMENT_BYTES)}'`)).toThrow(
+    /over D1's 100000 byte cap and was not sent/,
+  );
   // Multi-byte text counts in bytes: 34,000 of 3 bytes is 102,000.
   expect(() => db.prepare(`SELECT '${"€".repeat(34_000)}'`)).toThrow(/was not sent/);
   expect(sent).toEqual(["SELECT 1"]);
@@ -100,7 +139,13 @@ test("the guard throws on a statement over the cap before it reaches the databas
 
 test("a restore that loses a row fails the drill, and the scratch database is still deleted", async () => {
   await dumpDatabase(src, bucket, { now: NOW });
-  const scratch = scratchOf(tamper(dst, (sql) => (sql.startsWith('INSERT INTO "comments"') ? 'INSERT INTO "comments" ("id", "post_id", "text") SELECT ?1, ?2, ?3 WHERE ?1 < 3' : sql)));
+  const scratch = scratchOf(
+    tamper(dst, (sql) =>
+      sql.startsWith('INSERT INTO "comments"')
+        ? 'INSERT INTO "comments" ("id", "post_id", "text") SELECT ?1, ?2, ?3 WHERE ?1 < 3'
+        : sql,
+    ),
+  );
   const result = await runRestoreDrill(bucket, { ...scratch, now: LATER });
   expect(result.ok).toBe(false);
   expect(checkOf(result, "restore").detail).toMatch(/comments restored 2 rows, the dump holds 3/);
@@ -110,7 +155,9 @@ test("a restore that loses a row fails the drill, and the scratch database is st
 
 test("a dropped FTS5 rebuild fails the fts and search checks, though every table restored", async () => {
   await dumpDatabase(src, bucket, { now: NOW });
-  const scratch = scratchOf(tamper(dst, (sql) => (sql.includes("VALUES ('rebuild')") ? "SELECT 1" : sql)));
+  const scratch = scratchOf(
+    tamper(dst, (sql) => (sql.includes("VALUES ('rebuild')") ? "SELECT 1" : sql)),
+  );
   const result = await runRestoreDrill(bucket, { ...scratch, now: LATER });
   expect(checkOf(result, "restore").ok).toBe(true);
   expect(checkOf(result, "counts").ok).toBe(true);
@@ -125,10 +172,16 @@ test("a dropped FTS5 rebuild fails the fts and search checks, though every table
 test("a database with no FTS5 table passes search and says why", async () => {
   const plain = await sandbox();
   try {
-    await exec(plain.src, ["CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)", "INSERT INTO notes (body) VALUES ('sample text')"]);
+    await exec(plain.src, [
+      "CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)",
+      "INSERT INTO notes (body) VALUES ('sample text')",
+    ]);
     await dumpDatabase(plain.src, plain.bucket, { now: NOW });
     const result = await runRestoreDrill(plain.bucket, { ...scratchOf(plain.dst), now: LATER });
-    expect(checkOf(result, "search")).toMatchObject({ ok: true, detail: expect.stringMatching(/no FTS5 tables/) });
+    expect(checkOf(result, "search")).toMatchObject({
+      ok: true,
+      detail: expect.stringMatching(/no FTS5 tables/),
+    });
     expect(result.ok).toBe(true);
   } finally {
     await plain.dispose();
@@ -144,7 +197,11 @@ test("a stale dump fails the drill, and maxAgeHours: null turns the check off", 
   // The stale drill still restored into dst, so the second run needs an empty database.
   const fresh = await sandbox();
   try {
-    const off = await runRestoreDrill(bucket, { ...scratchOf(fresh.dst), now: late, maxAgeHours: null });
+    const off = await runRestoreDrill(bucket, {
+      ...scratchOf(fresh.dst),
+      now: late,
+      maxAgeHours: null,
+    });
     expect(off.ok).toBe(true);
   } finally {
     await fresh.dispose();
@@ -162,20 +219,34 @@ test("an empty bucket fails the drill without creating a scratch database", asyn
 test("a scratch database that cannot be deleted is reported by name", async () => {
   await dumpDatabase(src, bucket, { now: NOW });
   const result = await runRestoreDrill(bucket, {
-    createScratch: async () => ({ db: dst, delete: async () => Promise.reject(new Error("API 500")) }),
+    createScratch: async () => ({
+      db: dst,
+      delete: async () => Promise.reject(new Error("API 500")),
+    }),
     now: LATER,
     pid: 9,
   });
-  expect(checkOf(result, "scratch")).toEqual({ name: "scratch", ok: false, detail: "restore-drill-2026-09-27-9 was NOT deleted, delete it by hand: API 500" });
+  expect(checkOf(result, "scratch")).toEqual({
+    name: "scratch",
+    ok: false,
+    detail: "restore-drill-2026-09-27-9 was NOT deleted, delete it by hand: API 500",
+  });
 });
 
 test("a row lost after the restore's own count check fails the drill's recount", async () => {
   await dumpDatabase(src, bucket, { now: NOW });
   // The rebuild runs after every table's count is checked, so a row it deletes is one only the drill's recount can see.
-  const scratch = scratchOf(tamper(dst, (sql) => (sql.includes("VALUES ('rebuild')") ? 'DELETE FROM "comments" WHERE "id" = 3' : sql)));
+  const scratch = scratchOf(
+    tamper(dst, (sql) =>
+      sql.includes("VALUES ('rebuild')") ? 'DELETE FROM "comments" WHERE "id" = 3' : sql,
+    ),
+  );
   const result = await runRestoreDrill(bucket, { ...scratch, now: LATER });
   expect(checkOf(result, "restore").ok).toBe(true);
-  expect(checkOf(result, "counts")).toMatchObject({ ok: false, detail: "comments has 2, the marker says 3" });
+  expect(checkOf(result, "counts")).toMatchObject({
+    ok: false,
+    detail: "comments has 2, the marker says 3",
+  });
   expect(result.ok).toBe(false);
 });
 
@@ -193,7 +264,9 @@ async function download(): Promise<string> {
 test("a downloaded directory is a read-only bucket the drill runs from", async () => {
   const dumped = await dumpDatabase(src, bucket, { now: NOW });
   const dir = directoryBucket(await download());
-  expect((await dir.list({ prefix: "backups/json/" })).objects.map((o) => o.key).sort()).toEqual([...dumped.keys, "backups/json/_latest.json"].sort());
+  expect((await dir.list({ prefix: "backups/json/" })).objects.map((o) => o.key).sort()).toEqual(
+    [...dumped.keys, "backups/json/_latest.json"].sort(),
+  );
   expect(await dir.get("backups/json/none/_complete.json")).toBeNull();
   await expect(dir.get("../outside.json")).rejects.toThrow(/outside/);
   await expect(dir.put("k", "v")).rejects.toThrow(/read only/);
@@ -203,15 +276,35 @@ test("a downloaded directory is a read-only bucket the drill runs from", async (
 
 // Cloudflare's D1 REST API, answered by the Miniflare database, so the adapter's requests
 // are read by something that runs them. It does not enforce the real API's limits.
-function fakeCloudflare(target: D1Like, calls: Array<{ method: string; path: string; auth: string | null; body: unknown }>): typeof fetch {
+function fakeCloudflare(
+  target: D1Like,
+  calls: Array<{ method: string; path: string; auth: string | null; body: unknown }>,
+): typeof fetch {
   return (async (url: string, init: RequestInit) => {
     const path = new URL(url).pathname;
     const body = init.body === undefined ? undefined : JSON.parse(String(init.body));
-    calls.push({ method: init.method ?? "GET", path, auth: new Headers(init.headers).get("authorization"), body });
-    const reply = (result: unknown, success = true, status = 200) => new Response(JSON.stringify({ success, result, errors: success ? [] : [{ message: "nope" }] }), { status });
-    if (init.method === "POST" && path.endsWith("/d1/database")) return reply({ uuid: "scratch-uuid" });
+    calls.push({
+      method: init.method ?? "GET",
+      path,
+      auth: new Headers(init.headers).get("authorization"),
+      body,
+    });
+    const reply = (result: unknown, success = true, status = 200) =>
+      new Response(
+        JSON.stringify({ success, result, errors: success ? [] : [{ message: "nope" }] }),
+        { status },
+      );
+    if (init.method === "POST" && path.endsWith("/d1/database"))
+      return reply({ uuid: "scratch-uuid" });
     if (init.method === "DELETE") return reply({});
-    const run = async (q: { sql: string; params?: unknown[] }) => ({ results: (await target.prepare(q.sql).bind(...(q.params ?? [])).all()).results });
+    const run = async (q: { sql: string; params?: unknown[] }) => ({
+      results: (
+        await target
+          .prepare(q.sql)
+          .bind(...(q.params ?? []))
+          .all()
+      ).results,
+    });
     if (body.batch) {
       const out = [];
       for (const q of body.batch) out.push(await run(q));
@@ -228,8 +321,16 @@ test("the REST scratch adapter creates, fills and deletes a database named resto
   const create = cloudflareScratch("acct", "tok", fakeCloudflare(dst, calls));
   const result = await runRestoreDrill(bucket, { createScratch: create, now: LATER, pid: 5 });
   expect(result.checks.filter((c) => !c.ok)).toEqual([]);
-  expect(calls[0]).toMatchObject({ method: "POST", path: "/client/v4/accounts/acct/d1/database", auth: "Bearer tok", body: { name: "restore-drill-2026-09-27-5" } });
-  expect(calls.at(-1)).toMatchObject({ method: "DELETE", path: "/client/v4/accounts/acct/d1/database/scratch-uuid" });
+  expect(calls[0]).toMatchObject({
+    method: "POST",
+    path: "/client/v4/accounts/acct/d1/database",
+    auth: "Bearer tok",
+    body: { name: "restore-drill-2026-09-27-5" },
+  });
+  expect(calls.at(-1)).toMatchObject({
+    method: "DELETE",
+    path: "/client/v4/accounts/acct/d1/database/scratch-uuid",
+  });
   expect(calls.some((c) => c.path.endsWith("/scratch-uuid/query"))).toBe(true);
   expect((await rows(dst, "SELECT COUNT(*) AS n FROM comments"))[0].n).toBe(3);
 });
@@ -239,7 +340,15 @@ test("the REST adapter refuses a name that is not a scratch name, and never echo
   const create = cloudflareScratch("acct", "secret-token", fakeCloudflare(dst, calls));
   await expect(create("production-db")).rejects.toThrow(/refusing to create "production-db"/);
   expect(calls).toEqual([]);
-  const failing = cloudflareScratch("acct", "secret-token", (async () => new Response(JSON.stringify({ success: false, result: null, errors: [{ message: "bad token" }] }), { status: 403 })) as unknown as typeof fetch);
+  const failing = cloudflareScratch(
+    "acct",
+    "secret-token",
+    (async () =>
+      new Response(
+        JSON.stringify({ success: false, result: null, errors: [{ message: "bad token" }] }),
+        { status: 403 },
+      )) as unknown as typeof fetch,
+  );
   const err = await failing("restore-drill-x").catch((e: Error) => e);
   expect((err as Error).message).toBe("d1-dump: POST /d1/database failed (403): bad token");
   expect((err as Error).message).not.toContain("secret-token");
@@ -247,8 +356,14 @@ test("the REST adapter refuses a name that is not a scratch name, and never echo
 
 test("a table holding a BLOB cannot be bound over REST, and says so", async () => {
   await dumpDatabase(src, bucket, { now: NOW });
-  const scratch = await cloudflareScratch("acct", "tok", fakeCloudflare(dst, []))("restore-drill-b");
-  expect(() => scratch.db.prepare("INSERT INTO posts (cover) VALUES (?1)").bind([0, 255])).toThrow(/cannot bind a BLOB/);
+  const scratch = await cloudflareScratch(
+    "acct",
+    "tok",
+    fakeCloudflare(dst, []),
+  )("restore-drill-b");
+  expect(() => scratch.db.prepare("INSERT INTO posts (cover) VALUES (?1)").bind([0, 255])).toThrow(
+    /cannot bind a BLOB/,
+  );
 });
 
 // Cloudflare's R2 REST API in front of the Miniflare bucket: List Objects answers in the API's
@@ -257,15 +372,29 @@ function fakeR2(bucket: R2Like, urls: string[]): typeof fetch {
   const base = "https://api.cloudflare.com/client/v4/accounts/acct/r2/buckets/site-backups/objects";
   return (async (input: string, init?: RequestInit) => {
     urls.push(input);
-    if (new Headers(init?.headers).get("authorization") !== "Bearer tok") return new Response("{}", { status: 403 });
+    if (new Headers(init?.headers).get("authorization") !== "Bearer tok")
+      return new Response("{}", { status: 403 });
     const url = new URL(input);
     if (input.startsWith(`${base}?`)) {
-      const page = await bucket.list({ prefix: url.searchParams.get("prefix") ?? "", cursor: url.searchParams.get("cursor") ?? undefined });
+      const page = await bucket.list({
+        prefix: url.searchParams.get("prefix") ?? "",
+        cursor: url.searchParams.get("cursor") ?? undefined,
+      });
       const result_info = { is_truncated: page.truncated, cursor: page.cursor, per_page: 1000 };
-      return Response.json({ success: true, errors: [], result: page.objects.map((o) => ({ key: o.key })), result_info });
+      return Response.json({
+        success: true,
+        errors: [],
+        result: page.objects.map((o) => ({ key: o.key })),
+        result_info,
+      });
     }
     const obj = await bucket.get(decodeURIComponent(input.slice(base.length + 1)));
-    return obj ? new Response(await obj.text()) : Response.json({ success: false, errors: [{ code: 10007, message: "not found" }] }, { status: 404 });
+    return obj
+      ? new Response(await obj.text())
+      : Response.json(
+          { success: false, errors: [{ code: 10007, message: "not found" }] },
+          { status: 404 },
+        );
   }) as unknown as typeof fetch;
 }
 
@@ -274,15 +403,35 @@ test("--bucket downloads the newest complete run, and only it, then drills it", 
   const newer = await dumpDatabase(src, bucket, { now: NOW });
   const urls: string[] = [];
   const run = (accountId?: string) =>
-    drillFromBucket({ accountId, apiToken: "tok", bucket: "site-backups", maxAgeHours: null, fetchImpl: fakeR2(bucket, urls) });
+    drillFromBucket({
+      accountId,
+      apiToken: "tok",
+      bucket: "site-backups",
+      maxAgeHours: null,
+      fetchImpl: fakeR2(bucket, urls),
+    });
 
   const { code, lines } = await run("acct");
   expect(code).toBe(0);
-  expect(lines[0]).toMatch(new RegExp(`^restore drill PASSED: ${newer.prefix} into restore-drill-\\S+ \\(sqlite\\)$`));
-  expect(lines[1]).toBe(`downloaded ${newer.keys.length} objects of ${newer.prefix} from site-backups`);
+  expect(lines[0]).toMatch(
+    new RegExp(`^restore drill PASSED: ${newer.prefix} into restore-drill-\\S+ \\(sqlite\\)$`),
+  );
+  expect(lines[1]).toBe(
+    `downloaded ${newer.keys.length} objects of ${newer.prefix} from site-backups`,
+  );
   expect(urls.filter((u) => u.includes(older.run_id))).toEqual([]);
-  expect(await run(undefined)).toEqual({ code: 3, lines: ["restore drill could not run: --bucket needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment"] });
-  const denied = await drillFromBucket({ accountId: "acct", apiToken: "wrong-token", bucket: "site-backups", fetchImpl: fakeR2(bucket, []) });
+  expect(await run(undefined)).toEqual({
+    code: 3,
+    lines: [
+      "restore drill could not run: --bucket needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment",
+    ],
+  });
+  const denied = await drillFromBucket({
+    accountId: "acct",
+    apiToken: "wrong-token",
+    bucket: "site-backups",
+    fetchImpl: fakeR2(bucket, []),
+  });
   expect(denied.code).toBe(3);
   expect(denied.lines.join("\n")).not.toContain("wrong-token");
 });
@@ -298,7 +447,11 @@ test("only node.ts imports node:, so the package entry bundles into a Worker", (
 
 test("drill-files restores a sample of each files backup into scratch and checks the bytes against the copy and its etag", async () => {
   // A files backup as backupFiles leaves it: the copies under files/media/ and its marker.
-  for (let i = 0; i < 8; i++) await (bucket as unknown as R2FilesLike).put(`files/media/img/${i}.bin`, new Uint8Array(Array.from({ length: 300 + i }, (_, j) => (i * 31 + j) % 256)));
+  for (let i = 0; i < 8; i++)
+    await (bucket as unknown as R2FilesLike).put(
+      `files/media/img/${i}.bin`,
+      new Uint8Array(Array.from({ length: 300 + i }, (_, j) => (i * 31 + j) % 256)),
+    );
   await bucket.put("files/media/_complete.json", "{}");
   const base = "https://api.cloudflare.com/client/v4/accounts/acct/r2/buckets/site-backups/objects";
   // The REST API's list envelope and Get Object with the object's bytes and etag; `lie` names a key whose etag is wrong.
@@ -306,18 +459,44 @@ test("drill-files restores a sample of each files backup into scratch and checks
     (async (input: string) => {
       if (input.startsWith(`${base}?`)) {
         const page = await bucket.list({ prefix: new URL(input).searchParams.get("prefix") ?? "" });
-        return Response.json({ success: true, errors: [], result: page.objects.map((o) => ({ key: o.key })), result_info: { is_truncated: false } });
+        return Response.json({
+          success: true,
+          errors: [],
+          result: page.objects.map((o) => ({ key: o.key })),
+          result_info: { is_truncated: false },
+        });
       }
       const key = decodeURIComponent(input.slice(base.length + 1));
-      const obj = (await (bucket as unknown as R2FilesLike).get(key)) as unknown as { etag: string; arrayBuffer(): Promise<ArrayBuffer> } | null;
-      if (!obj) return Response.json({ success: false, errors: [{ message: "not found" }] }, { status: 404 });
-      return new Response(await obj.arrayBuffer(), { headers: { etag: `"${key.endsWith(lie ?? "-") ? "0".repeat(32) : obj.etag}"` } });
+      const obj = (await (bucket as unknown as R2FilesLike).get(key)) as unknown as {
+        etag: string;
+        arrayBuffer(): Promise<ArrayBuffer>;
+      } | null;
+      if (!obj)
+        return Response.json(
+          { success: false, errors: [{ message: "not found" }] },
+          { status: 404 },
+        );
+      return new Response(await obj.arrayBuffer(), {
+        headers: { etag: `"${key.endsWith(lie ?? "-") ? "0".repeat(32) : obj.etag}"` },
+      });
     }) as unknown as typeof fetch;
-  const passed = await drillFilesFromBucket({ accountId: "acct", apiToken: "tok", bucket: "site-backups", sample: 3, fetchImpl: rest() });
+  const passed = await drillFilesFromBucket({
+    accountId: "acct",
+    apiToken: "tok",
+    bucket: "site-backups",
+    sample: 3,
+    fetchImpl: rest(),
+  });
   expect(passed.lines.join("\n")).toMatch(/files drill PASSED: media/);
   expect(passed.code).toBe(0);
   expect(passed.lines.filter((l) => /bytes match and the etag/.test(l))).toHaveLength(3);
-  const lied = await drillFilesFromBucket({ accountId: "acct", apiToken: "tok", bucket: "site-backups", sample: 8, fetchImpl: rest("img/3.bin") });
+  const lied = await drillFilesFromBucket({
+    accountId: "acct",
+    apiToken: "tok",
+    bucket: "site-backups",
+    sample: 8,
+    fetchImpl: rest("img/3.bin"),
+  });
   expect(lied.code).toBe(1);
   expect(lied.lines.join("\n")).toMatch(/FAIL img\/3\.bin: MD5 \S+ is not the etag 0{32}/);
 });
@@ -325,6 +504,7 @@ test("drill-files restores a sample of each files backup into scratch and checks
 test("a stored key never reaches a path outside the folder it is written under", () => {
   const root = join(tmpdir(), "scratch");
   expect(pathInside(root, "files/media/a.bin")).toBe(join(root, "files", "media", "a.bin"));
-  for (const key of ["../a.bin", "files/../../a.bin", "..", "/etc/a.bin", ""]) expect(() => pathInside(root, key)).toThrow(/is outside/);
+  for (const key of ["../a.bin", "files/../../a.bin", "..", "/etc/a.bin", ""])
+    expect(() => pathInside(root, key)).toThrow(/is outside/);
   expect(() => pathInside(join(root, "media"), "../media-x/a.bin")).toThrow(/is outside/);
 });

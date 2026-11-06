@@ -1,4 +1,9 @@
-import { COMPLETE_MARKER, SCHEMA_SIDECAR, type CompleteMarker, type SchemaSidecar } from "./dump.js";
+import {
+  COMPLETE_MARKER,
+  SCHEMA_SIDECAR,
+  type CompleteMarker,
+  type SchemaSidecar,
+} from "./dump.js";
 import { readDumpJson } from "./gzip.js";
 import { restoreDump, type RestoreOptions, type RestoreResult } from "./restore.js";
 import { DEFAULT_STALE_HOURS, latestDump } from "./runs.js";
@@ -21,20 +26,31 @@ export interface StatementStats {
 }
 
 function boundOf(values: unknown[]): number {
-  return values.reduce<number>((n, v) => n + (typeof v === "string" || Array.isArray(v) ? v.length : 0), 0);
+  return values.reduce<number>(
+    (n, v) => n + (typeof v === "string" || Array.isArray(v) ? v.length : 0),
+    0,
+  );
 }
 
 // Wraps a database so every statement is measured before it is sent. A statement over
 // D1's cap throws here and is never sent, so a drill that finishes is a drill in which
 // none was.
 export function guardStatements(db: D1Like): { db: D1Like; stats: StatementStats } {
-  const stats: StatementStats = { statements: 0, batches: 0, maxStatementBytes: 0, maxBoundValue: 0, maxBatchBound: 0 };
+  const stats: StatementStats = {
+    statements: 0,
+    batches: 0,
+    maxStatementBytes: 0,
+    maxBoundValue: 0,
+    maxBatchBound: 0,
+  };
   // Each wrapper maps back to the statement it stands for, and to the size it bound.
   const real = new WeakMap<D1Statement, { inner: D1Statement; bound: number }>();
   const wrap = (inner: D1Statement, bound: number): D1Statement => {
     const stmt: D1Statement = {
       bind: (...values) => {
-        for (const v of values) if (typeof v === "string" || Array.isArray(v)) stats.maxBoundValue = Math.max(stats.maxBoundValue, v.length);
+        for (const v of values)
+          if (typeof v === "string" || Array.isArray(v))
+            stats.maxBoundValue = Math.max(stats.maxBoundValue, v.length);
         return wrap(inner.bind(...values), boundOf(values));
       },
       all: ((): Promise<{ results: never[] }> => {
@@ -52,7 +68,10 @@ export function guardStatements(db: D1Like): { db: D1Like; stats: StatementStats
   const guarded: D1Like = {
     prepare: (sql) => {
       const bytes = new TextEncoder().encode(sql).length;
-      if (bytes > D1_MAX_STATEMENT_BYTES) throw new Error(`d1-dump: a statement of ${bytes} bytes is over D1's ${D1_MAX_STATEMENT_BYTES} byte cap and was not sent`);
+      if (bytes > D1_MAX_STATEMENT_BYTES)
+        throw new Error(
+          `d1-dump: a statement of ${bytes} bytes is over D1's ${D1_MAX_STATEMENT_BYTES} byte cap and was not sent`,
+        );
       stats.maxStatementBytes = Math.max(stats.maxStatementBytes, bytes);
       return wrap(db.prepare(sql), 0);
     },
@@ -60,7 +79,10 @@ export function guardStatements(db: D1Like): { db: D1Like; stats: StatementStats
       const parts = statements.map((s) => real.get(s) ?? { inner: s, bound: 0 });
       stats.batches++;
       stats.statements += statements.length;
-      stats.maxBatchBound = Math.max(stats.maxBatchBound, parts.reduce((n, p) => n + p.bound, 0));
+      stats.maxBatchBound = Math.max(
+        stats.maxBatchBound,
+        parts.reduce((n, p) => n + p.bound, 0),
+      );
       return db.batch(parts.map((p) => p.inner));
     },
   };
@@ -109,7 +131,9 @@ function readJson<T>(bucket: R2Like, key: string): Promise<T> {
 }
 
 async function count(db: D1Like, table: string): Promise<number> {
-  const { results } = await db.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(table)}`).all<{ n: number }>();
+  const { results } = await db
+    .prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(table)}`)
+    .all<{ n: number }>();
   return results[0]?.n ?? Number.NaN;
 }
 
@@ -139,7 +163,10 @@ function wordIn(rows: Array<Record<string, unknown>>, column: string): string | 
 //   scratch   the scratch database is deleted
 export async function runRestoreDrill(bucket: R2Like, options: DrillOptions): Promise<DrillResult> {
   const now = options.now ?? new Date();
-  const name = scratchName(now, options.pid ?? (globalThis as { process?: { pid?: number } }).process?.pid ?? 0);
+  const name = scratchName(
+    now,
+    options.pid ?? (globalThis as { process?: { pid?: number } }).process?.pid ?? 0,
+  );
   const checks: DrillCheck[] = [];
   const check = (n: string, ok: boolean, detail: string) => checks.push({ name: n, ok, detail });
   let run: string | null = null;
@@ -159,9 +186,17 @@ export async function runRestoreDrill(bucket: R2Like, options: DrillOptions): Pr
       const maxAge = options.maxAgeHours === undefined ? DEFAULT_STALE_HOURS : options.maxAgeHours;
       const ageHours = (now.getTime() - Date.parse(marker.exported_at)) / 3_600_000;
       if (maxAge !== null && !(ageHours <= maxAge)) {
-        check("dump", false, `exported ${marker.exported_at}, ${ageHours.toFixed(1)}h before the drill, over ${maxAge}h`);
+        check(
+          "dump",
+          false,
+          `exported ${marker.exported_at}, ${ageHours.toFixed(1)}h before the drill, over ${maxAge}h`,
+        );
       } else {
-        check("dump", true, `${prefix} exported ${marker.exported_at}, ${marker.tables.length} tables`);
+        check(
+          "dump",
+          true,
+          `${prefix} exported ${marker.exported_at}, ${marker.tables.length} tables`,
+        );
       }
     } catch (err) {
       marker = null;
@@ -176,7 +211,11 @@ export async function runRestoreDrill(bucket: R2Like, options: DrillOptions): Pr
       stats = guarded.stats;
       try {
         restored = await restoreDump(guarded.db, bucket, prefix, options.restore);
-        check("restore", true, `${restored.tables.length} tables, ${restored.rebuilt.length} FTS5 indexes rebuilt, ${restored.empty.length} contentless left empty`);
+        check(
+          "restore",
+          true,
+          `${restored.tables.length} tables, ${restored.rebuilt.length} FTS5 indexes rebuilt, ${restored.empty.length} contentless left empty`,
+        );
       } catch (err) {
         check("restore", false, (err as Error).message);
       }
@@ -184,21 +223,30 @@ export async function runRestoreDrill(bucket: R2Like, options: DrillOptions): Pr
       check(
         "statements",
         stats.statements > 0 && stats.maxStatementBytes <= D1_MAX_STATEMENT_BYTES,
-        `${stats.statements} statements in ${stats.batches} batches, longest ${stats.maxStatementBytes} bytes of ${D1_MAX_STATEMENT_BYTES}; largest bound value ${stats.maxBoundValue}, most bound by one batch ${stats.maxBatchBound}`
+        `${stats.statements} statements in ${stats.batches} batches, longest ${stats.maxStatementBytes} bytes of ${D1_MAX_STATEMENT_BYTES}; largest bound value ${stats.maxBoundValue}, most bound by one batch ${stats.maxBatchBound}`,
       );
     } finally {
       try {
         await scratch.delete();
         check("scratch", true, `${name} deleted`);
       } catch (err) {
-        check("scratch", false, `${name} was NOT deleted, delete it by hand: ${(err as Error).message}`);
+        check(
+          "scratch",
+          false,
+          `${name} was NOT deleted, delete it by hand: ${(err as Error).message}`,
+        );
       }
     }
   }
   return { ok: checks.every((c) => c.ok), scratch: name, run, checks, restored, stats };
 }
 
-async function verify(db: D1Like, bucket: R2Like, marker: CompleteMarker, check: (n: string, ok: boolean, detail: string) => void): Promise<void> {
+async function verify(
+  db: D1Like,
+  bucket: R2Like,
+  marker: CompleteMarker,
+  check: (n: string, ok: boolean, detail: string) => void,
+): Promise<void> {
   let total = 0;
   const wrong: string[] = [];
   for (const t of marker.tables) {
@@ -206,7 +254,15 @@ async function verify(db: D1Like, bucket: R2Like, marker: CompleteMarker, check:
     total += n;
     if (n !== t.rows) wrong.push(`${t.name} has ${n}, the marker says ${t.rows}`);
   }
-  check("counts", wrong.length === 0 && total > 0, wrong.length > 0 ? wrong.join("; ") : total === 0 ? "the copy holds no rows at all" : `${marker.tables.length} tables, ${total} rows, all equal to the marker`);
+  check(
+    "counts",
+    wrong.length === 0 && total > 0,
+    wrong.length > 0
+      ? wrong.join("; ")
+      : total === 0
+        ? "the copy holds no rows at all"
+        : `${marker.tables.length} tables, ${total} rows, all equal to the marker`,
+  );
 
   const behind: string[] = [];
   let indexed = 0;
@@ -215,15 +271,23 @@ async function verify(db: D1Like, bucket: R2Like, marker: CompleteMarker, check:
       const docs = await count(db, `${f.name}_docsize`);
       const rows = await count(db, f.content);
       indexed += docs;
-      if (docs !== rows) behind.push(`${f.name} indexes ${docs} documents, ${f.content} holds ${rows}`);
+      if (docs !== rows)
+        behind.push(`${f.name} indexes ${docs} documents, ${f.content} holds ${rows}`);
     } else if (f.mode === "internal") {
       const dumped = marker.tables.find((t) => t.name === f.name)?.rows;
       const docs = await count(db, `${f.name}_docsize`);
       indexed += docs;
-      if (docs !== dumped) behind.push(`${f.name} indexes ${docs} documents, the dump held ${dumped}`);
+      if (docs !== dumped)
+        behind.push(`${f.name} indexes ${docs} documents, the dump held ${dumped}`);
     }
   }
-  check("fts", behind.length === 0, behind.length > 0 ? behind.join("; ") : `${marker.fts.length} FTS5 tables, ${indexed} indexed documents`);
+  check(
+    "fts",
+    behind.length === 0,
+    behind.length > 0
+      ? behind.join("; ")
+      : `${marker.fts.length} FTS5 tables, ${indexed} indexed documents`,
+  );
 
   // One search: the first external or internal index that holds a document. A database
   // with no FTS5 table at all (foxhound) has nothing to search, which is a pass that says
@@ -237,13 +301,24 @@ async function verify(db: D1Like, bucket: R2Like, marker: CompleteMarker, check:
     const source = f.mode === "external" ? f.content : f.name;
     const file = marker.tables.find((t) => t.name === source);
     if (!file || file.rows === 0) continue;
-    const { results: cols } = await db.prepare(`PRAGMA table_info(${quoteIdent(f.name)})`).all<{ name: string }>();
+    const { results: cols } = await db
+      .prepare(`PRAGMA table_info(${quoteIdent(f.name)})`)
+      .all<{ name: string }>();
     const { rows } = await readJson<{ rows: Array<Record<string, unknown>> }>(bucket, file.key);
     for (const col of cols) {
       const word = wordIn(rows, col.name);
       if (!word) continue;
-      const { results } = await db.prepare(`SELECT rowid FROM ${quoteIdent(f.name)} WHERE ${quoteIdent(f.name)} MATCH ?1`).bind(`"${word}"`).all();
-      check("search", results.length > 0, results.length > 0 ? `"${word}" found ${results.length} document(s) in ${f.name}.${col.name}` : `"${word}" is in a restored ${source} row but ${f.name} does not find it`);
+      const { results } = await db
+        .prepare(`SELECT rowid FROM ${quoteIdent(f.name)} WHERE ${quoteIdent(f.name)} MATCH ?1`)
+        .bind(`"${word}"`)
+        .all();
+      check(
+        "search",
+        results.length > 0,
+        results.length > 0
+          ? `"${word}" found ${results.length} document(s) in ${f.name}.${col.name}`
+          : `"${word}" is in a restored ${source} row but ${f.name} does not find it`,
+      );
       return;
     }
   }

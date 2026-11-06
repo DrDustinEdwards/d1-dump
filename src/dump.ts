@@ -85,12 +85,20 @@ export function runIdFor(now: Date): string {
   return now.toISOString().replace(/[:.]/g, "-");
 }
 
-async function* pages(db: D1Like, table: string, idColumn: string, maxId: number, pageRows: number): AsyncGenerator<unknown[]> {
+async function* pages(
+  db: D1Like,
+  table: string,
+  idColumn: string,
+  maxId: number,
+  pageRows: number,
+): AsyncGenerator<unknown[]> {
   let after = -Number.MAX_SAFE_INTEGER;
   const id = quoteIdent(idColumn);
   while (true) {
     const { results } = await db
-      .prepare(`SELECT * FROM ${quoteIdent(table)} WHERE ${id} > ?1 AND ${id} <= ?2 ORDER BY ${id} LIMIT ?3`)
+      .prepare(
+        `SELECT * FROM ${quoteIdent(table)} WHERE ${id} > ?1 AND ${id} <= ?2 ORDER BY ${id} LIMIT ?3`,
+      )
       .bind(after, maxId, pageRows)
       .all<Record<string, number>>();
     if (results.length === 0) return;
@@ -104,7 +112,11 @@ async function* pages(db: D1Like, table: string, idColumn: string, maxId: number
 //
 // All reads that are not paged run in one D1 batch, which is one transaction, so the
 // dump describes one instant. Throws on any failure, and then writes no marker.
-export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOptions = {}): Promise<DumpResult> {
+export async function dumpDatabase(
+  db: D1Like,
+  bucket: R2Like,
+  options: DumpOptions = {},
+): Promise<DumpResult> {
   const prefix = options.prefix ?? DEFAULT_PREFIX;
   const now = options.now ?? new Date();
   const exportedAt = now.toISOString();
@@ -118,25 +130,35 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
   const internalFts = plan.fts.filter((f) => f.mode === "internal").map((f) => f.name);
   const known = new Set([...plan.tables, ...internalFts]);
   for (const name of [...exclude, ...Object.keys(paged)]) {
-    if (!known.has(name)) throw new Error(`d1-dump: ${name} is named in the options but is not a dumpable table`);
+    if (!known.has(name))
+      throw new Error(`d1-dump: ${name} is named in the options but is not a dumpable table`);
   }
   for (const [name, p] of Object.entries(paged)) {
-    if (!Number.isInteger(p.pageRows) || p.pageRows < 1) throw new Error(`d1-dump: ${name} pageRows must be a whole number of at least 1`);
+    if (!Number.isInteger(p.pageRows) || p.pageRows < 1)
+      throw new Error(`d1-dump: ${name} pageRows must be a whole number of at least 1`);
   }
   const targets = [...plan.tables, ...internalFts].filter((t) => !exclude.includes(t));
   for (const name of Object.keys(sidecarsOf(options))) {
-    if (targets.includes(name.slice(1, -".json".length))) throw new Error(`d1-dump: sidecar ${name} would overwrite a table`);
+    if (targets.includes(name.slice(1, -".json".length)))
+      throw new Error(`d1-dump: sidecar ${name} would overwrite a table`);
   }
 
   const snapshot = await db.batch(
     targets.map((t) => {
       const p = paged[t];
       // The row count at the same instant, so the pages read afterwards can be held to it.
-      if (p) return db.prepare(`SELECT MAX(${quoteIdent(p.idColumn)}) AS max_id, COUNT(*) AS n FROM ${quoteIdent(t)}`);
+      if (p)
+        return db.prepare(
+          `SELECT MAX(${quoteIdent(p.idColumn)}) AS max_id, COUNT(*) AS n FROM ${quoteIdent(t)}`,
+        );
       // An internal FTS5 table is read with its rowid, which the restore needs to keep
       // any join on it.
-      return db.prepare(internalFts.includes(t) ? `SELECT rowid AS "rowid", * FROM ${quoteIdent(t)}` : `SELECT * FROM ${quoteIdent(t)}`);
-    })
+      return db.prepare(
+        internalFts.includes(t)
+          ? `SELECT rowid AS "rowid", * FROM ${quoteIdent(t)}`
+          : `SELECT * FROM ${quoteIdent(t)}`,
+      );
+    }),
   );
 
   const keys: string[] = [];
@@ -153,10 +175,19 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
       const head = `{"exported_at":${JSON.stringify(exportedAt)},"table":${JSON.stringify(table)},"rows":[`;
       rows = Number.isNaN(maxId)
         ? await putJsonStreamed(bucket, key, head, (async function* () {})(), compress)
-        : await putJsonStreamed(bucket, key, head, pages(db, table, p.idColumn, maxId, p.pageRows), compress);
+        : await putJsonStreamed(
+            bucket,
+            key,
+            head,
+            pages(db, table, p.idColumn, maxId, p.pageRows),
+            compress,
+          );
       // Fewer rows than the snapshot held means a repeated id was skipped or rows went away mid-dump: not a backup.
       const expected = Number(first?.n ?? 0);
-      if (rows !== expected) throw new Error(`d1-dump: ${table} paged ${rows} rows but held ${expected} when the dump began`);
+      if (rows !== expected)
+        throw new Error(
+          `d1-dump: ${table} paged ${rows} rows but held ${expected} when the dump began`,
+        );
     } else {
       const body = JSON.stringify({ exported_at: exportedAt, table, rows: results });
       if (compress) await bucket.put(key, await gzipText(body), GZIP_TYPE);
@@ -170,11 +201,19 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
   }
 
   const schemaKey = `${runPrefix}${SCHEMA_SIDECAR}`;
-  await bucket.put(schemaKey, JSON.stringify({ exported_at: exportedAt, schema: plan.schema } satisfies SchemaSidecar), JSON_TYPE);
+  await bucket.put(
+    schemaKey,
+    JSON.stringify({ exported_at: exportedAt, schema: plan.schema } satisfies SchemaSidecar),
+    JSON_TYPE,
+  );
   keys.push(schemaKey);
   for (const [file, value] of Object.entries(sidecarsOf(options))) {
     const key = `${runPrefix}${file}`;
-    await bucket.put(key, JSON.stringify({ exported_at: exportedAt, ...(value as object) }), JSON_TYPE);
+    await bucket.put(
+      key,
+      JSON.stringify({ exported_at: exportedAt, ...(value as object) }),
+      JSON_TYPE,
+    );
     keys.push(key);
   }
 
@@ -199,7 +238,13 @@ export async function dumpDatabase(db: D1Like, bucket: R2Like, options: DumpOpti
 export async function writeCompleteMarker(bucket: R2Like, result: DumpResult): Promise<string> {
   if (result.complete) throw new Error(`d1-dump: ${result.prefix} is already marked complete`);
   const key = `${result.prefix}${COMPLETE_MARKER}`;
-  const marker: CompleteMarker = { exported_at: result.exported_at, keys: [...result.keys], tables: result.tables, fts: result.fts, excluded: result.excluded };
+  const marker: CompleteMarker = {
+    exported_at: result.exported_at,
+    keys: [...result.keys],
+    tables: result.tables,
+    fts: result.fts,
+    excluded: result.excluded,
+  };
   await bucket.put(key, JSON.stringify(marker), JSON_TYPE);
   result.keys.push(key);
   result.complete = true;
@@ -224,10 +269,13 @@ async function advancePointer(bucket: R2Like, result: DumpResult): Promise<void>
 function sidecarsOf(options: DumpOptions): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(options.sidecars ?? {})) {
-    if (!/^[a-z0-9-]+$/.test(name)) throw new Error(`d1-dump: sidecar name ${name} must be lowercase letters, digits and dashes`);
-    if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`d1-dump: sidecar ${name} must be an object`);
+    if (!/^[a-z0-9-]+$/.test(name))
+      throw new Error(`d1-dump: sidecar name ${name} must be lowercase letters, digits and dashes`);
+    if (value === null || typeof value !== "object" || Array.isArray(value))
+      throw new Error(`d1-dump: sidecar ${name} must be an object`);
     const file = `_${name}.json`;
-    if (file === COMPLETE_MARKER || file === SCHEMA_SIDECAR) throw new Error(`d1-dump: sidecar name ${name} is reserved`);
+    if (file === COMPLETE_MARKER || file === SCHEMA_SIDECAR)
+      throw new Error(`d1-dump: sidecar name ${name} is reserved`);
     out[file] = value;
   }
   return out;

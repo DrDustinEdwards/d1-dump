@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { COMPLETE_MARKER, LATEST_POINTER, backupHealth, latestDump, pruneDumps, runIdFor, selectStaleRuns, writeCompleteMarker, type DumpResult, type R2Like } from "../src/index.js";
+import {
+  COMPLETE_MARKER,
+  LATEST_POINTER,
+  backupHealth,
+  latestDump,
+  pruneDumps,
+  runIdFor,
+  selectStaleRuns,
+  writeCompleteMarker,
+  type DumpResult,
+  type R2Like,
+} from "../src/index.js";
 import { sandbox } from "./helpers.js";
 
 let bucket: R2Like;
@@ -12,8 +23,15 @@ const P = "backups/json/";
 // A run as the dump leaves it: one table file, and the marker when complete.
 async function run(at: string, complete: boolean): Promise<string> {
   const id = runIdFor(new Date(at));
-  await bucket.put(`${P}${id}/posts.json`, JSON.stringify({ exported_at: at, table: "posts", rows: [] }));
-  if (complete) await bucket.put(`${P}${id}/${COMPLETE_MARKER}`, JSON.stringify({ exported_at: at, keys: [], tables: [], fts: [], excluded: [] }));
+  await bucket.put(
+    `${P}${id}/posts.json`,
+    JSON.stringify({ exported_at: at, table: "posts", rows: [] }),
+  );
+  if (complete)
+    await bucket.put(
+      `${P}${id}/${COMPLETE_MARKER}`,
+      JSON.stringify({ exported_at: at, keys: [], tables: [], fts: [], excluded: [] }),
+    );
   return id;
 }
 
@@ -26,19 +44,40 @@ test("backup health reports the newest complete dump in Capsid's /health shape, 
   await run("2026-09-26T09:00:00.000Z", true);
   await run("2026-09-27T09:00:00.000Z", false);
   const now = new Date("2026-09-27T12:00:00.000Z");
-  expect(await backupHealth(bucket, { now })).toEqual({ last_ok: "2026-09-26T09:00:00.000Z", age_hours: 27, warning: "last complete dump was 27h ago, over the 26h threshold" });
-  expect(await backupHealth(bucket, { now: new Date("2026-09-26T21:30:00.000Z") })).toEqual({ last_ok: "2026-09-26T09:00:00.000Z", age_hours: 12.5 });
+  expect(await backupHealth(bucket, { now })).toEqual({
+    last_ok: "2026-09-26T09:00:00.000Z",
+    age_hours: 27,
+    warning: "last complete dump was 27h ago, over the 26h threshold",
+  });
+  expect(await backupHealth(bucket, { now: new Date("2026-09-26T21:30:00.000Z") })).toEqual({
+    last_ok: "2026-09-26T09:00:00.000Z",
+    age_hours: 12.5,
+  });
   expect((await latestDump(bucket))?.run_id).toBe("2026-09-26T09-00-00-000Z");
   // However many files each run holds, the runs are named by one list call.
   for (let i = 0; i < 5; i++) await bucket.put(`${P}2026-09-26T09-00-00-000Z/t${i}.json`, "{}");
   let lists = 0;
-  const counted: R2Like = { ...bucket, list: (o) => (lists++, bucket.list(o)), get: (k) => bucket.get(k) };
+  const counted: R2Like = {
+    ...bucket,
+    list: (o) => (lists++, bucket.list(o)),
+    get: (k) => bucket.get(k),
+  };
   expect((await latestDump(counted))?.run_id).toBe("2026-09-26T09-00-00-000Z");
   expect(lists).toBe(1);
   // Each marker write points _latest.json at its run, and then the newest dump is found with no list.
   const marked = async (at: string) => {
     const run_id = runIdFor(new Date(at));
-    const dump: DumpResult = { run_id, prefix: `${P}${run_id}/`, exported_at: at, keys: [], tables: [], fts: [], excluded: [], shadow_skipped: [], complete: false };
+    const dump: DumpResult = {
+      run_id,
+      prefix: `${P}${run_id}/`,
+      exported_at: at,
+      keys: [],
+      tables: [],
+      fts: [],
+      excluded: [],
+      shadow_skipped: [],
+      complete: false,
+    };
     await writeCompleteMarker(bucket, dump);
     return run_id;
   };
@@ -46,35 +85,59 @@ test("backup health reports the newest complete dump in Capsid's /health shape, 
   const newer = await marked("2026-09-28T09:00:00.000Z");
   // A run that finishes after a newer one leaves the pointer on the newer.
   await marked("2026-09-25T09:00:00.000Z");
-  expect(await backupHealth(counted, { now: new Date("2026-09-28T12:00:00.000Z") })).toEqual({ last_ok: "2026-09-28T09:00:00.000Z", age_hours: 3 });
+  expect(await backupHealth(counted, { now: new Date("2026-09-28T12:00:00.000Z") })).toEqual({
+    last_ok: "2026-09-28T09:00:00.000Z",
+    age_hours: 3,
+  });
   expect(lists).toBe(0);
   // A pointer whose run lost its marker is not trusted: the listing finds the newest complete run.
   await bucket.delete(`${P}${newer}/${COMPLETE_MARKER}`);
   expect((await latestDump(counted))?.run_id).toBe("2026-09-26T09-00-00-000Z");
   expect(lists).toBe(1);
-  expect((await bucket.list({ prefix: P, delimiter: "/" })).objects.map((o) => o.key)).toEqual([`${P}${LATEST_POINTER}`]);
+  expect((await bucket.list({ prefix: P, delimiter: "/" })).objects.map((o) => o.key)).toEqual([
+    `${P}${LATEST_POINTER}`,
+  ]);
 });
 
 test("backup health with no complete dump is a warning, not a missing field", async () => {
-  expect(await backupHealth(bucket)).toEqual({ last_ok: null, age_hours: null, warning: "no complete dump found" });
+  expect(await backupHealth(bucket)).toEqual({
+    last_ok: null,
+    age_hours: null,
+    warning: "no complete dump found",
+  });
   await run("2026-09-27T09:00:00.000Z", false);
-  expect(await backupHealth(bucket)).toEqual({ last_ok: null, age_hours: null, warning: "no complete dump found" });
+  expect(await backupHealth(bucket)).toEqual({
+    last_ok: null,
+    age_hours: null,
+    warning: "no complete dump found",
+  });
 });
 
 test("backup health that cannot read the bucket says so rather than throwing", async () => {
-  const unbound = async () => { throw new Error("bucket unbound"); };
+  const unbound = async () => {
+    throw new Error("bucket unbound");
+  };
   const broken = { ...bucket, list: unbound, get: unbound } as unknown as R2Like;
-  expect(await backupHealth(broken)).toEqual({ last_ok: null, age_hours: null, warning: "backup freshness unreadable: bucket unbound" });
+  expect(await backupHealth(broken)).toEqual({
+    last_ok: null,
+    age_hours: null,
+    warning: "backup freshness unreadable: bucket unbound",
+  });
 });
 
 test("flat prune (retentionDays or minKept given) keeps by age with a floor of the newest complete runs, and an incomplete run holds no slot", async () => {
   // Twenty daily complete runs, the newest 2026-09-20, plus two old incomplete ones.
-  for (let d = 1; d <= 20; d++) await run(`2026-06-${String(d).padStart(2, "0")}T09:00:00.000Z`, true);
+  for (let d = 1; d <= 20; d++)
+    await run(`2026-06-${String(d).padStart(2, "0")}T09:00:00.000Z`, true);
   await run("2026-05-01T09:00:00.000Z", false);
   await run("2026-06-21T09:00:00.000Z", false);
   // 2026-09-27 less 90 days is 2026-06-29: every run is past retention, so only the
   // floor survives: the 14 newest complete runs, 06-07 to 06-20.
-  const result = await pruneDumps(bucket, { now: new Date("2026-09-27T12:00:00.000Z"), retentionDays: 90, minKept: 14 });
+  const result = await pruneDumps(bucket, {
+    now: new Date("2026-09-27T12:00:00.000Z"),
+    retentionDays: 90,
+    minKept: 14,
+  });
   expect(result).toEqual({ kept: 14, pruned: 8, locked: 0 });
   const left = await runIds();
   expect(left[0]).toBe("2026-06-07T09-00-00-000Z");
@@ -82,13 +145,24 @@ test("flat prune (retentionDays or minKept given) keeps by age with a floor of t
 });
 
 test("flat prune keeps a run inside retention even past the floor", async () => {
-  for (let d = 1; d <= 20; d++) await run(`2026-09-${String(d).padStart(2, "0")}T09:00:00.000Z`, true);
-  expect(await pruneDumps(bucket, { now: new Date("2026-09-27T12:00:00.000Z"), retentionDays: 90, minKept: 14 })).toEqual({ kept: 20, pruned: 0, locked: 0 });
+  for (let d = 1; d <= 20; d++)
+    await run(`2026-09-${String(d).padStart(2, "0")}T09:00:00.000Z`, true);
+  expect(
+    await pruneDumps(bucket, {
+      now: new Date("2026-09-27T12:00:00.000Z"),
+      retentionDays: 90,
+      minKept: 14,
+    }),
+  ).toEqual({ kept: 20, pruned: 0, locked: 0 });
 });
 
 test("prune deletes nothing while no complete run exists, which is what a wrong bucket looks like", async () => {
   await run("2026-01-01T09:00:00.000Z", false);
-  expect(await pruneDumps(bucket, { now: new Date("2026-09-27T12:00:00.000Z") })).toEqual({ kept: 1, pruned: 0, locked: 0 });
+  expect(await pruneDumps(bucket, { now: new Date("2026-09-27T12:00:00.000Z") })).toEqual({
+    kept: 1,
+    pruned: 0,
+    locked: 0,
+  });
   expect(await runIds()).toEqual(["2026-01-01T09-00-00-000Z"]);
 });
 
@@ -97,7 +171,11 @@ test("prune deletes nothing while no complete run exists, which is what a wrong 
 // One complete run at 09:00 UTC on every day from `from` to `to`, both inclusive, except
 // the days named in `skip`.
 async function daily(from: string, to: string, skip: string[] = []): Promise<void> {
-  for (let ms = Date.parse(`${from}T00:00:00.000Z`); ms <= Date.parse(`${to}T00:00:00.000Z`); ms += 86_400_000) {
+  for (
+    let ms = Date.parse(`${from}T00:00:00.000Z`);
+    ms <= Date.parse(`${to}T00:00:00.000Z`);
+    ms += 86_400_000
+  ) {
     const day = new Date(ms).toISOString().slice(0, 10);
     if (!skip.includes(day)) await run(`${day}T09:00:00.000Z`, true);
   }
@@ -168,7 +246,10 @@ test("graduated prune never removes the newest complete run, even when it is old
 
 test("graduated prune takes its windows from a policy the caller passes", async () => {
   await daily("2026-09-01", "2026-09-27");
-  await pruneDumps(bucket, { now: new Date("2026-09-27T12:00:00.000Z"), policy: { daily: 3, weekly: 0, monthly: 0 } });
+  await pruneDumps(bucket, {
+    now: new Date("2026-09-27T12:00:00.000Z"),
+    policy: { daily: 3, weekly: 0, monthly: 0 },
+  });
   expect(days(await runIds())).toEqual(["2026-09-25", "2026-09-26", "2026-09-27"]);
 });
 test("selectStaleRuns is the rule pruneDumps applies, over run ids alone and in any input order", () => {
@@ -182,14 +263,27 @@ test("selectStaleRuns is the rule pruneDumps applies, over run ids alone and in 
     { id: id("2026-09-27"), complete: true }, // newest complete, never selected
   ];
   expect(selectStaleRuns(runs, { now })).toEqual([id("2026-08-01"), id("2026-03-01")]);
-  expect(selectStaleRuns([...runs].reverse(), { now })).toEqual([id("2026-08-01"), id("2026-03-01")]);
-  expect(selectStaleRuns(runs.filter((r) => !r.complete), { now }), "no complete run, nothing selected").toEqual([]);
+  expect(selectStaleRuns([...runs].reverse(), { now })).toEqual([
+    id("2026-08-01"),
+    id("2026-03-01"),
+  ]);
+  expect(
+    selectStaleRuns(
+      runs.filter((r) => !r.complete),
+      { now },
+    ),
+    "no complete run, nothing selected",
+  ).toEqual([]);
 });
 
 // A bucket whose delete refuses, as R2 does under a bucket lock rule (R2 error 10069,
 // ObjectLockedByBucketPolicy), every key `locked` matches. The refusal is per call, as
 // the binding's bulk delete is: one locked key fails the call.
-function lockedBucket(inner: R2Like, locked: (key: string) => boolean, err?: Error): R2Like & { calls: string[][] } {
+function lockedBucket(
+  inner: R2Like,
+  locked: (key: string) => boolean,
+  err?: Error,
+): R2Like & { calls: string[][] } {
   const calls: string[][] = [];
   return {
     calls,
@@ -201,7 +295,15 @@ function lockedBucket(inner: R2Like, locked: (key: string) => boolean, err?: Err
       const list = Array.isArray(keys) ? keys : [keys];
       calls.push(list);
       if (list.some(locked)) {
-        throw err ?? Object.assign(new Error("delete: Object is protected by a bucket lock rule and cannot be modified or deleted. (10069)"), { code: 10069 });
+        throw (
+          err ??
+          Object.assign(
+            new Error(
+              "delete: Object is protected by a bucket lock rule and cannot be modified or deleted. (10069)",
+            ),
+            { code: 10069 },
+          )
+        );
       }
       await inner.delete(keys);
     },
@@ -227,7 +329,9 @@ test("prune skips a run whose delete a bucket lock refuses, counts it, and goes 
   expect(keys).toContain(`${P}${dup}/${COMPLETE_MARKER}`);
   expect(keys).toContain(`${P}${dup}/posts.json`);
   // Next day, past the lock, the same run goes.
-  expect(await pruneDumps(bucket, { now: new Date("2026-10-11T12:00:00.000Z") })).toMatchObject({ locked: 0 });
+  expect(await pruneDumps(bucket, { now: new Date("2026-10-11T12:00:00.000Z") })).toMatchObject({
+    locked: 0,
+  });
   expect(await runIds()).not.toContain(dup);
 });
 
@@ -250,5 +354,7 @@ test("prune still throws on a delete failure that is not a lock refusal", async 
   await run("2026-09-27T09:00:00.000Z", true);
   await run("2026-01-05T09:00:00.000Z", true);
   const broken = lockedBucket(bucket, () => true, new Error("delete: Internal Error (10001)"));
-  await expect(pruneDumps(broken, { now: new Date("2026-09-27T12:00:00.000Z") })).rejects.toThrow("Internal Error (10001)");
+  await expect(pruneDumps(broken, { now: new Date("2026-09-27T12:00:00.000Z") })).rejects.toThrow(
+    "Internal Error (10001)",
+  );
 });
