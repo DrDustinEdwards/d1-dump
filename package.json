@@ -26,13 +26,16 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "bloat": "devkit-no-bloat",
-    "lint": "oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error"
+    "lint": "oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check"
   },
   "devDependencies": {
-    "@dustinedwards/devkit": "github:DrDustinEdwards/devkit#v0.23.0",
+    "@dustinedwards/devkit": "github:DrDustinEdwards/devkit#v0.24.0",
     "@types/node": "24.19.2",
     "@vitest/coverage-v8": "5.0.5",
     "miniflare": "4.20260730.0",
+    "oxfmt": "0.77.0",
     "oxlint": "1.92.0",
     "oxlint-tsgolint": "7.0.2006",
     "typescript": "7.0.2",
