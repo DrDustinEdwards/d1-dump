@@ -18,4 +18,4 @@ concurrency:
 
 jobs:
   no-bloat:
-    uses: DrDustinEdwards/devkit/.github/workflows/no-bloat.yml@e2914d9fdd2b2ef4eb7d393db739c3bb2a808583 # v0.23.0
+    uses: DrDustinEdwards/devkit/.github/workflows/no-bloat.yml@a5562b298a5aa36f32c336ca153d47da09306862 # v0.24.1
