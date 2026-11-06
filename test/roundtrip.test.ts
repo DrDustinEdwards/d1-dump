@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { COMPLETE_MARKER, dumpDatabase, readPlan, restoreDump, writeCompleteMarker, type D1Like, type R2Like } from "../src/index.js";
-import { SITE_ROWS, SITE_SCHEMA, exec, rows, sandbox } from "./helpers.js";
+import { SITE_ROWS, SITE_SCHEMA, exec, readBytes, readText, rows, sandbox, tableKey } from "./helpers.js";
 
 let src: D1Like;
 let dst: D1Like;
@@ -79,11 +79,11 @@ test("a compressed dump is smaller, restores row for row, and sits beside a plai
 
   expect(packed.tables.every((t) => t.key.endsWith(`/${t.name}.json.gz`))).toBe(true);
   expect(plain.tables.every((t) => t.key.endsWith(`/${t.name}.json`))).toBe(true);
-  const size = async (key: string) => (await (await bucket.get(key))!.arrayBuffer!()).byteLength;
-  const auditKey = (r: typeof plain) => r.tables.find((t) => t.name === "audit")!.key;
+  const size = async (key: string) => (await readBytes(bucket, key)).byteLength;
+  const auditKey = (r: typeof plain) => tableKey(r, "audit");
   expect(await size(auditKey(packed))).toBeLessThan((await size(auditKey(plain))) / 4);
   // Gzip bytes, not JSON text, are what the object holds.
-  expect(new Uint8Array(await (await bucket.get(auditKey(packed)))!.arrayBuffer!()).slice(0, 2)).toEqual(new Uint8Array([0x1f, 0x8b]));
+  expect(new Uint8Array(await readBytes(bucket, auditKey(packed))).slice(0, 2)).toEqual(new Uint8Array([0x1f, 0x8b]));
 
   const restored = await restoreDump(dst, bucket, packed.prefix);
   expect(restored.rebuilt).toEqual(["posts_fts"]);
@@ -117,8 +117,8 @@ test("a failed write leaves no marker, so the run is not a complete dump", async
 
 test("a restore whose table file lost rows is refused", async () => {
   const dumped = await dumpDatabase(src, bucket, { now: NOW });
-  const key = dumped.tables.find((t) => t.name === "comments")!.key;
-  const file = JSON.parse(await (await bucket.get(key))!.text());
+  const key = tableKey(dumped, "comments");
+  const file = JSON.parse(await readText(bucket, key));
   file.rows.pop();
   await bucket.put(key, JSON.stringify(file));
   await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(/comments\.json holds 2 rows, the marker says 3/);
@@ -141,9 +141,9 @@ test("a paged table must stream every row the snapshot held, and a page size mus
 
 test("sidecars are written before the marker and listed in it", async () => {
   const dumped = await dumpDatabase(src, bucket, { now: NOW, sidecars: { kv: { keys: { mode: "off" } } } });
-  const marker = JSON.parse(await (await bucket.get(`${dumped.prefix}${COMPLETE_MARKER}`))!.text());
+  const marker = JSON.parse(await readText(bucket, `${dumped.prefix}${COMPLETE_MARKER}`));
   expect(marker.keys).toContain(`${dumped.prefix}_kv.json`);
-  expect(JSON.parse(await (await bucket.get(`${dumped.prefix}_kv.json`))!.text())).toEqual({ exported_at: NOW.toISOString(), keys: { mode: "off" } });
+  expect(JSON.parse(await readText(bucket, `${dumped.prefix}_kv.json`))).toEqual({ exported_at: NOW.toISOString(), keys: { mode: "off" } });
   await expect(dumpDatabase(src, bucket, { sidecars: { complete: {} } })).rejects.toThrow(/reserved/);
 });
 
@@ -158,7 +158,7 @@ test("markComplete: false writes every object but the marker, and writeCompleteM
   expect(key).toBe(`${dumped.prefix}${COMPLETE_MARKER}`);
   expect(dumped.complete).toBe(true);
   expect(dumped.keys.at(-1)).toBe(key);
-  const marker = JSON.parse(await (await bucket.get(key))!.text());
+  const marker = JSON.parse(await readText(bucket, key));
   expect(marker.keys).toEqual(dumped.keys.slice(0, -1));
   expect((await restoreDump(dst, bucket, dumped.prefix)).tables.length).toBe(dumped.tables.length);
   await expect(writeCompleteMarker(bucket, dumped)).rejects.toThrow(/already marked complete/);

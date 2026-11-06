@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { D1_MAX_STATEMENT_BYTES, dumpDatabase, restoreDump, runRestoreDrill, writeCompleteMarker, type D1Like, type R2Like } from "../src/index.js";
 import { pickBackend, sqliteScratch } from "../src/node.js";
-import { SITE_ROWS, SITE_SCHEMA, checkOf, exec, rows, sandbox } from "./helpers.js";
+import { SITE_ROWS, SITE_SCHEMA, checkOf, exec, readText, rows, sandbox, statsOf, tableKey } from "./helpers.js";
 
 // The same drill against the tokenless backend: a local SQLite file (node:sqlite).
 
@@ -65,8 +65,8 @@ test("sqlite: a 141 KB value with newlines restores byte for byte and no stateme
   const result = await runRestoreDrill(bucket, { ...scratch, now: LATER });
   expect(result.checks.filter((c) => !c.ok)).toEqual([]);
   expect(scratch.out.read).toEqual([{ body: paper }]);
-  expect(result.stats!.maxStatementBytes).toBeLessThan(D1_MAX_STATEMENT_BYTES);
-  expect(result.stats!.maxBoundValue).toBe(paper.length);
+  expect(statsOf(result).maxStatementBytes).toBeLessThan(D1_MAX_STATEMENT_BYTES);
+  expect(statsOf(result).maxBoundValue).toBe(paper.length);
 });
 
 test("sqlite: a dropped FTS5 rebuild fails the fts and search checks", async () => {
@@ -116,8 +116,8 @@ test("the backend is sqlite without credentials, d1 with them, and either can be
 // schema can say it is missing.
 test("a column missing from every row of a table is refused, naming it", async () => {
   const dumped = await dumpDatabase(src, bucket, { now: NOW, markComplete: false });
-  const key = dumped.tables.find((t) => t.name === "comments")!.key;
-  const file = JSON.parse(await (await bucket.get(key))!.text());
+  const key = tableKey(dumped, "comments");
+  const file = JSON.parse(await readText(bucket, key));
   for (const row of file.rows) delete row.text;
   await bucket.put(key, JSON.stringify(file));
   await writeCompleteMarker(bucket, dumped);
@@ -126,8 +126,8 @@ test("a column missing from every row of a table is refused, naming it", async (
 
 test("a column the schema does not have is refused too, and an FTS5 table that carries a rowid is not", async () => {
   const dumped = await dumpDatabase(src, bucket, { now: NOW });
-  const key = dumped.tables.find((t) => t.name === "settings")!.key;
-  const file = JSON.parse(await (await bucket.get(key))!.text());
+  const key = tableKey(dumped, "settings");
+  const file = JSON.parse(await readText(bucket, key));
   for (const row of file.rows) row.extra = 1;
   await bucket.put(key, JSON.stringify(file));
   await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(/settings row 0 .*not in the schema: extra/);

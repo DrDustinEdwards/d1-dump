@@ -1,5 +1,5 @@
 import { Miniflare } from "miniflare";
-import type { D1Like, DrillResult, R2FilesLike, R2Like } from "../src/index.js";
+import type { D1Like, DrillResult, R2FilesLike, R2Like, StatementStats } from "../src/index.js";
 
 // Real D1 (SQLite with FTS5) and R2, in-process, as workerd runs them.
 export async function sandbox(): Promise<{ src: D1Like; dst: D1Like; bucket: R2Like; media: R2FilesLike; dispose: () => Promise<void> }> {
@@ -53,4 +53,31 @@ export function checkOf(result: DrillResult, name: string) {
   const c = result.checks.find((x) => x.name === name);
   if (!c) throw new Error(`no ${name} check ran: ${result.checks.map((x) => x.name).join(", ")}`);
   return c;
+}
+
+/** The drill's statement stats, or a throw: a drill that ran its restore records them. */
+export function statsOf(result: DrillResult): StatementStats {
+  if (!result.stats) throw new Error("the drill recorded no statement stats");
+  return result.stats;
+}
+
+/** The key of a dumped table's file, or a throw naming the tables that were dumped. */
+export function tableKey(dumped: { tables: Array<{ name: string; key: string }> }, name: string): string {
+  const t = dumped.tables.find((x) => x.name === name);
+  if (!t) throw new Error(`no ${name} table was dumped: ${dumped.tables.map((x) => x.name).join(", ")}`);
+  return t.key;
+}
+
+/** An object's text, or a throw naming the key. */
+export async function readText(bucket: R2Like, key: string): Promise<string> {
+  const obj = await bucket.get(key);
+  if (!obj) throw new Error(`no object at ${key}`);
+  return obj.text();
+}
+
+/** An object's bytes, or a throw naming the key. */
+export async function readBytes(bucket: R2Like, key: string): Promise<ArrayBuffer> {
+  const obj = await bucket.get(key);
+  if (!obj?.arrayBuffer) throw new Error(`no object with bytes at ${key}`);
+  return obj.arrayBuffer();
 }
