@@ -2,7 +2,7 @@ import { createReadStream, createWriteStream, existsSync, mkdtempSync, rmSync } 
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -13,6 +13,16 @@ import { SCRATCH_PREFIX, runRestoreDrill, type Scratch } from "./drill.js";
 import { FILES_COMPLETE, FILES_PREFIX, FILES_PROGRESS, restoreFiles } from "./files.js";
 import { latestDump } from "./runs.js";
 import type { D1Like, D1Statement, R2FilesLike, R2Like, R2ObjectLike } from "./types.js";
+
+// Where a stored key lives under root on disk. A key that would land outside root (a "..", an
+// absolute name) throws, because keys come from a bucket and a crafted one must not write or
+// read anywhere else. Every key-to-path in this file goes through it.
+export function pathInside(root: string, key: string): string {
+  const base = resolve(root);
+  const path = resolve(base, ...key.split("/"));
+  if (isAbsolute(key) || !path.startsWith(base + sep)) throw new Error(`d1-dump: ${key} is outside ${root}`);
+  return path;
+}
 
 // A downloaded dump as an R2Like, read only, for a drill run from Node. `root` holds the
 // keys as paths: <root>/backups/json/<run id>/<table>.json. Not exported from the package
@@ -32,8 +42,7 @@ export function directoryBucket(root: string): R2Like {
   };
   return {
     get: async (key) => {
-      const path = join(root, ...key.split("/"));
-      if (relative(root, path).startsWith("..")) throw new Error(`d1-dump: ${key} is outside ${root}`);
+      const path = pathInside(root, key);
       const bytes = await readFile(path).catch((err: NodeJS.ErrnoException) => {
         if (err.code === "ENOENT") return null;
         throw err;
@@ -127,7 +136,7 @@ export async function downloadLatestRun(bucket: RestBucket, root: string, prefix
     if (!key.startsWith(latest.prefix) || key.split("/").includes("..")) throw new Error(`d1-dump: ${markerKey} lists ${key}, outside its run`);
     const body = await bucket.stream(key);
     if (!body) continue;
-    const path = join(root, ...key.split("/"));
+    const path = pathInside(root, key);
     await mkdir(dirname(path), { recursive: true });
     await pipeline(Readable.fromWeb(body as NodeReadableStream<Uint8Array>), createWriteStream(path));
     objects++;
@@ -221,11 +230,6 @@ async function keysOf(bucket: RestBucket, prefix: string): Promise<string[]> {
 // A directory as an R2FilesLike: list and get read the files under root, put writes one. Its
 // objects carry no metadata, which the drill does not check.
 function directoryFiles(root: string): R2FilesLike {
-  const pathOf = (key: string) => {
-    const path = join(root, ...key.split("/"));
-    if (relative(root, path).startsWith("..")) throw new Error(`d1-dump: ${key} is outside ${root}`);
-    return path;
-  };
   const all = async (dir: string): Promise<string[]> => {
     const out: string[] = [];
     for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
@@ -245,12 +249,12 @@ function directoryFiles(root: string): R2FilesLike {
       truncated: false,
     }),
     get: async (key) => {
-      const path = pathOf(key);
+      const path = pathInside(root, key);
       if (!existsSync(path)) return null;
       return { ...object(key), body: Readable.toWeb(createReadStream(path)), text: () => readFile(path, "utf8") };
     },
     put: async (key, value) => {
-      const path = pathOf(key);
+      const path = pathInside(root, key);
       await mkdir(dirname(path), { recursive: true });
       const body = value instanceof Uint8Array || typeof value === "string" ? Readable.from([value]) : Readable.fromWeb(value as NodeReadableStream<Uint8Array>);
       await pipeline(body, createWriteStream(path));
@@ -292,13 +296,13 @@ export async function drillFilesFromBucket(options: FilesDrillOptions): Promise<
       if (!all.includes(`${base}${FILES_COMPLETE}`)) lines.push(`  note ${name}: no complete pass yet (${base}${FILES_COMPLETE}); drilling the copies there are`);
       const step = copies.length / Math.min(sample, copies.length);
       const picked = [...new Set(Array.from({ length: Math.min(sample, copies.length) }, (_, i) => copies[Math.floor(i * step)]))];
-      const from = join(scratch, name, "backup");
-      const into = join(scratch, name, "restored");
+      const from = pathInside(scratch, `${name}/backup`);
+      const into = pathInside(scratch, `${name}/restored`);
       const held = new Map<string, { etag: string | null }>();
       for (const key of picked) {
         const res = await bucket.response(key);
         if (!res?.body) throw new Error(`${key} was listed and then could not be read`);
-        const path = join(from, ...key.split("/"));
+        const path = pathInside(from, key);
         await mkdir(dirname(path), { recursive: true });
         await pipeline(Readable.fromWeb(res.body as NodeReadableStream<Uint8Array>), createWriteStream(path));
         held.set(key, { etag: res.headers.get("etag")?.replace(/^W\//, "").replace(/"/g, "") ?? null });
@@ -308,8 +312,8 @@ export async function drillFilesFromBucket(options: FilesDrillOptions): Promise<
       if (!restored) failed = true;
       lines.push(`  ${restored ? "ok  " : "FAIL"} ${name}: restoreFiles wrote ${result.counts.written} of ${picked.length} sampled copies (of ${copies.length})`);
       for (const key of picked) {
-        const copy = await digest(join(from, ...key.split("/")));
-        const target = join(into, ...key.slice(base.length).split("/"));
+        const copy = await digest(pathInside(from, key));
+        const target = pathInside(into, key.slice(base.length));
         const back = existsSync(target) ? await digest(target) : null;
         const etag = held.get(key)?.etag ?? null;
         const problems: string[] = [];
