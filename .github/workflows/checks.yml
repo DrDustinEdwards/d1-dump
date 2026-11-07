@@ -33,7 +33,7 @@ jobs:
       pull-requests: write
       id-token: write
       checks: write
-    uses: DrDustinEdwards/devkit/.github/workflows/pr.yml@507d1be20e6cbf76badcfeaadf944818c66cf54f # v0.26.1
+    uses: DrDustinEdwards/devkit/.github/workflows/pr.yml@7b07bc2ecb652f4f0341736a19c557dbb81b6f92 # v0.26.2
     with:
       review: true
       # A library, not a Worker.
