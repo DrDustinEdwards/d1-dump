@@ -1,0 +1,5 @@
+{
+  "copies": {
+    "src/checksum.ts": "hex stays local: d1-dump has no dependencies, so a site installs nothing else to back up, and importing site-runtime's toHex would make every site that runs the nightly backup install site-runtime through d1-dump"
+  }
+}
