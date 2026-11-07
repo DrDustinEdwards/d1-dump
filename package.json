@@ -29,7 +29,7 @@
   },
   "devDependencies": {
     "@dustinedwards/devkit": "github:DrDustinEdwards/devkit#v0.27.0",
-    "@types/node": "24.19.2",
+    "@types/node": "26.6.6",
     "@vitest/coverage-v8": "5.0.5",
     "miniflare": "4.20260730.0",
     "oxfmt": "0.77.0",
