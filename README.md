@@ -9,7 +9,7 @@ Each site installs it. D1 Time Travel already restores any minute of the last 30
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.14.0
+npm install github:DrDustinEdwards/d1-dump#v0.15.0
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -57,17 +57,17 @@ import { createSiteBackup } from "@dustinedwards/d1-dump";
 export const backup = createSiteBackup<Env>({
   dump: { exclude: ["session"], required: ["posts"], credentials: true }, // runCheckedBackup's options
   files: [
-    { name: "media", source: (env) => env.MEDIA, timeBudgetMs: 180_000, label: "media files" },
-    { name: "covers", source: (env) => env.COVERS, label: "cover files" },
+    { name: "media", source: (env) => env.MEDIA, timeBudgetMs: 180_000 },
+    { name: "covers", source: (env) => env.COVERS },
   ],
 });
 
 await backup.runBackup(env); // the checked dump; throws BackupIncomplete
 await backup.runFilesBackup(env); // every files pass; or runFilesBackup(env, ["covers"]) for one
-const status = await backup.status(env); // { last_ok, age_hours, files, covers, warning? }
+const status = await backup.status(env); // { last_ok, age_hours, files: { media, covers }, warning? }
 ```
 
-The database and bucket default to `env.DB` and `env.BACKUPS`; pass `db` and `bucket` to read others. Each files option is `backupFiles`' (`name`, `prefix`, `maxObjects`, `timeBudgetMs`, `keepDeletedDays`) plus `source`. `status` is `backupHealth` with each pass's `filesHealth` under a key: `files` for the first pass and its `name` for the others, unless `key` says otherwise (a site that already reports `revisions` keeps that key). `warning` is the dump's, else the first stale pass's, prefixed with its `label` when the site has several passes. It never throws. Two passes with one name or one key throw when the backup is created, not at 03:00.
+The database and bucket default to `env.DB` and `env.BACKUPS`; pass `db` and `bucket` to read others. Each files option is `backupFiles`' (`name`, `prefix`, `maxObjects`, `timeBudgetMs`, `keepDeletedDays`) plus `source`. `runBackup(env, now?)` and `runFilesBackup(env, names?, now?)` take the run's clock for a cron that hands one. `status` is `backupHealth` with each pass's `filesHealth` under `files` by its name, the same shape on every site; `warning` joins the dump's and each stale pass's (`media files: ...`) with `; `. It never throws. Two passes with one name throw when the backup is created, not at 03:00.
 
 ## Back up files
 

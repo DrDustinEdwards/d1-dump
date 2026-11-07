@@ -10,12 +10,6 @@ import type { D1Like, R2FilesLike, R2Like } from "./types.js";
 export interface SiteFilesBackup<Env> extends FilesOptions {
   // The bucket to copy, read from the Worker's env.
   source: (env: Env) => R2FilesLike;
-  // The name this pass has in the status. The first pass is `files` and the others take their
-  // `name` unless this says otherwise, so a site's /health keeps the keys it already reports.
-  key?: string;
-  // Prefixes this pass's warning in the combined one ("journal files: ...") when it is not the
-  // only pass.
-  label?: string;
 }
 
 export interface SiteBackupConfig<Env> {
@@ -32,17 +26,18 @@ export interface FilesPassSummary extends FilesCounts {
   complete: boolean;
 }
 
-// BackupHealth for the dump, and one more BackupHealth under each files pass's key.
-export type SiteBackupStatus = BackupHealth & Record<string, unknown>;
+// The dump's BackupHealth, and when the site has files passes, each pass's under `files` by its name.
+export type SiteBackupStatus = BackupHealth & { files?: Record<string, BackupHealth> };
 
 export interface SiteBackup<Env> {
   // The checked dump: dump, check, mark complete, prune. Throws BackupIncomplete on a failed check.
-  runBackup(env: Env): Promise<BackupResult>;
+  // `now` is the run's clock, for a site whose cron hands it one.
+  runBackup(env: Env, now?: Date): Promise<BackupResult>;
   // One files pass for each named backup (all of them when none is named), in the order given,
   // each going on where its last run stopped. Naming one the config lacks throws.
-  runFilesBackup(env: Env, names?: string[]): Promise<{ files: FilesPassSummary[] }>;
-  // The dump's health with every files pass's under its key, and one `warning` that is the
-  // first of them. Never throws.
+  runFilesBackup(env: Env, names?: string[], now?: Date): Promise<{ files: FilesPassSummary[] }>;
+  // The dump's health with every files pass's under `files` by name, and one `warning` joining
+  // each stale part's ("; "; a pass's is prefixed "<name> files: "). Never throws.
   status(env: Env, now?: Date): Promise<SiteBackupStatus>;
 }
 
@@ -53,20 +48,16 @@ export function createSiteBackup<Env>(config: SiteBackupConfig<Env>): SiteBackup
   const bucket =
     config.bucket ?? ((env: Env) => DEFAULT_ENV(env, "BACKUPS") as R2Like & R2FilesLike);
   const passes = config.files ?? [];
-  const keyOf = (pass: SiteFilesBackup<Env>, index: number) =>
-    pass.key ?? (index === 0 ? "files" : pass.name);
   const names = new Set<string>();
   for (const pass of passes) {
     if (names.has(pass.name)) throw new Error(`d1-dump: two files backups are named ${pass.name}`);
     names.add(pass.name);
   }
-  const keys = passes.map(keyOf);
-  if (new Set(keys).size !== keys.length)
-    throw new Error(`d1-dump: two files backups report as ${keys.join(", ")}`);
 
   return {
-    runBackup: (env) => runCheckedBackup(db(env), bucket(env), config.dump),
-    async runFilesBackup(env, only) {
+    runBackup: (env, now) =>
+      runCheckedBackup(db(env), bucket(env), now ? { ...config.dump, now } : config.dump),
+    async runFilesBackup(env, only, now) {
       const chosen = only
         ? only.map((name) => {
             const pass = passes.find((p) => p.name === name);
@@ -75,8 +66,12 @@ export function createSiteBackup<Env>(config: SiteBackupConfig<Env>): SiteBackup
           })
         : passes;
       const files: FilesPassSummary[] = [];
-      for (const { source, key: _key, label: _label, ...options } of chosen) {
-        const run = await backupFiles(source(env), bucket(env), options);
+      for (const { source, ...options } of chosen) {
+        const run = await backupFiles(
+          source(env),
+          bucket(env),
+          now ? { ...options, now } : options,
+        );
         files.push({ name: run.name, complete: run.complete, ...run.counts });
       }
       return { files };
@@ -87,17 +82,23 @@ export function createSiteBackup<Env>(config: SiteBackupConfig<Env>): SiteBackup
         backupHealth(target, { now, prefix: config.dump.prefix }),
         ...passes.map((p) => filesHealth(target, { name: p.name, now })),
       ]);
-      let warning = dump.warning;
-      passes.forEach((pass, i) => {
-        const w = healths[i]?.warning;
-        if (!warning && w) warning = passes.length > 1 && pass.label ? `${pass.label}: ${w}` : w;
-      });
-      const out: SiteBackupStatus = { ...dump };
-      passes.forEach((_, i) => {
-        out[keys[i] as string] = healths[i];
-      });
-      if (warning) out.warning = warning;
-      return out;
+      const warnings = [
+        dump.warning,
+        ...passes.map(
+          (pass, i) => healths[i]?.warning && `${pass.name} files: ${healths[i].warning}`,
+        ),
+      ].filter(Boolean);
+      return {
+        ...dump,
+        ...(passes.length > 0
+          ? {
+              files: Object.fromEntries(
+                passes.map((pass, i) => [pass.name, healths[i] as BackupHealth]),
+              ),
+            }
+          : {}),
+        ...(warnings.length > 0 ? { warning: warnings.join("; ") } : {}),
+      };
     },
   };
 }
