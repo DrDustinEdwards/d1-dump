@@ -1,12 +1,30 @@
+import { CHUNK_BYTES, checksumOf, chunkDigest, combineDigests } from "./checksum.js";
 import { GZIP_TYPE } from "./gzip.js";
 import type { R2Like, R2UploadedPartLike } from "./types.js";
 
-// R2 requires every part except the last to be the same size, and at least 5 MiB.
-const MULTIPART_PART_BYTES = 8 * 1024 * 1024;
+// R2 requires every part except the last to be the same size, and at least 5 MiB. The checksum's chunks are these parts.
+const MULTIPART_PART_BYTES = CHUNK_BYTES;
 // R2's bulk delete refuses more than 1000 keys in one call rather than truncating.
 const R2_DELETE_MAX = 1000;
 
 export const JSON_TYPE = { httpMetadata: { contentType: "application/json" } };
+
+/**
+ * Writes one object and returns its checksum. An object of one chunk is also sent with its SHA-256, which R2
+ * checks against what it received (developers.cloudflare.com/r2/api/workers/workers-api-reference/, put options).
+ */
+export async function putChecked(
+  bucket: R2Like,
+  key: string,
+  value: string | Uint8Array,
+  options: { httpMetadata?: { contentType?: string } },
+): Promise<string> {
+  const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
+  const checksum = await checksumOf(bytes);
+  const whole = checksum.startsWith("sha256:") ? checksum.slice("sha256:".length) : undefined;
+  await bucket.put(key, bytes, { ...options, ...(whole ? { sha256: whole } : {}) });
+  return checksum;
+}
 
 // Writes `head`, then the rows a page at a time, then "]}", as one multipart object.
 // The bytes equal JSON.stringify of the whole object, holding at most one part and one
@@ -18,15 +36,18 @@ export async function putJsonStreamed(
   head: string,
   pages: AsyncIterable<unknown[]>,
   gzip = false,
-): Promise<number> {
+): Promise<{ rows: number; checksum: string }> {
   const upload = await bucket.createMultipartUpload(key, gzip ? GZIP_TYPE : JSON_TYPE);
   const parts: R2UploadedPartLike[] = [];
   const encoder = new TextEncoder();
   let part = new Uint8Array(MULTIPART_PART_BYTES);
   let filled = 0;
   let rows = 0;
+  const digests: Uint8Array[] = [];
   const flush = async () => {
-    parts.push(await upload.uploadPart(parts.length + 1, part.slice(0, filled)));
+    const bytes = part.slice(0, filled);
+    digests.push(await chunkDigest(bytes));
+    parts.push(await upload.uploadPart(parts.length + 1, bytes));
     part = new Uint8Array(MULTIPART_PART_BYTES);
     filled = 0;
   };
@@ -74,7 +95,7 @@ export async function putJsonStreamed(
     }
     if (filled > 0 || parts.length === 0) await flush();
     await upload.complete(parts);
-    return rows;
+    return { rows, checksum: await combineDigests(digests) };
   } catch (err) {
     await gzWriter?.abort(err).catch(() => {});
     // The abort's own failure is reported with the cause, never in place of it.

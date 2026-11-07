@@ -28,7 +28,8 @@ export interface R2Like {
   put(
     key: string,
     value: string | Uint8Array,
-    options?: { httpMetadata?: { contentType?: string } },
+    // sha256 (hex) makes R2 refuse the upload unless the bytes it received hash to it.
+    options?: { httpMetadata?: { contentType?: string }; sha256?: string },
   ): Promise<unknown>;
   // arrayBuffer is what a gzip object (a dump written with `compress`) is read through.
   get(

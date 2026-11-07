@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { CHUNK_BYTES, checksumOf } from "../src/checksum.js";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import {
   COMPLETE_MARKER,
@@ -17,6 +19,7 @@ import {
   rows,
   sandbox,
   tableKey,
+  rewriteTable,
 } from "./helpers.js";
 
 let src: D1Like;
@@ -182,9 +185,7 @@ test("a failed write leaves no marker, so the run is not a complete dump", async
 test("a restore whose table file lost rows is refused", async () => {
   const dumped = await dumpDatabase(src, bucket, { now: NOW });
   const key = tableKey(dumped, "comments");
-  const file = JSON.parse(await readText(bucket, key));
-  file.rows.pop();
-  await bucket.put(key, JSON.stringify(file));
+  await rewriteTable(bucket, dumped, key, (file) => void file.rows.pop());
   await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(
     /comments\.json holds 2 rows, the marker says 3/,
   );
@@ -260,4 +261,18 @@ test("the plan puts a parent table before the tables that reference it", async (
   ]);
   const { tables } = await readPlan(src);
   expect(tables.indexOf("z_parent")).toBeLessThan(tables.indexOf("a_child"));
+});
+
+const sha = (b: Uint8Array) => createHash("sha256").update(b).digest();
+
+test("one chunk is plain SHA-256, more are S3's composite of the chunks' digests", async () => {
+  const small = new TextEncoder().encode("rows");
+  expect(await checksumOf(small)).toBe(`sha256:${sha(small).toString("hex")}`);
+  expect(await checksumOf(new Uint8Array(0))).toBe(
+    `sha256:${sha(new Uint8Array(0)).toString("hex")}`,
+  );
+
+  const big = new Uint8Array(CHUNK_BYTES + 5).fill(7);
+  const joined = Buffer.concat([sha(big.subarray(0, CHUNK_BYTES)), sha(big.subarray(CHUNK_BYTES))]);
+  expect(await checksumOf(big)).toBe(`sha256-2:${sha(joined).toString("hex")}`);
 });

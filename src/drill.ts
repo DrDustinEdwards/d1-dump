@@ -4,6 +4,7 @@ import {
   type CompleteMarker,
   type SchemaSidecar,
 } from "./dump.js";
+import { verifyChecksum } from "./checksum.js";
 import { readDumpJson } from "./gzip.js";
 import { restoreDump, type RestoreOptions, type RestoreResult } from "./restore.js";
 import { DEFAULT_STALE_HOURS, latestDump } from "./runs.js";
@@ -152,6 +153,8 @@ function wordIn(rows: Array<Record<string, unknown>>, column: string): string | 
 // Checks, each carrying what it read so "ok" cannot mean "read nothing":
 //   dump      the run is complete and no older than maxAgeHours
 //   restore   restoreDump finished, which itself checks each table against the marker
+//   checksums every object the marker lists has a SHA-256 in it, and the sidecars (the one kind restore does
+//             not read) match theirs; restore checked the tables and the schema as it read them
 //   counts    every table's rows, counted again in the copy, equal the marker's
 //   fts       each external FTS5 index holds as many documents as its content table
 //             (counted through _docsize: COUNT(*) on the FTS table reads through to the
@@ -186,7 +189,12 @@ export async function runRestoreDrill(bucket: R2Like, options: DrillOptions): Pr
     run = prefix;
     try {
       marker = await readDumpJson<CompleteMarker>(bucket, `${prefix}${COMPLETE_MARKER}`, missing);
-      await readDumpJson<SchemaSidecar>(bucket, `${prefix}${SCHEMA_SIDECAR}`, missing);
+      await readDumpJson<SchemaSidecar>(
+        bucket,
+        `${prefix}${SCHEMA_SIDECAR}`,
+        missing,
+        marker.checksums,
+      );
       const maxAge = options.maxAgeHours === undefined ? DEFAULT_STALE_HOURS : options.maxAgeHours;
       const ageHours = (now.getTime() - Date.parse(marker.exported_at)) / 3_600_000;
       if (maxAge !== null && !(ageHours <= maxAge)) {
@@ -229,6 +237,7 @@ export async function runRestoreDrill(bucket: R2Like, options: DrillOptions): Pr
         } catch (err) {
           check("restore", false, (err as Error).message);
         }
+        if (restored) await verifyChecksums(bucket, prefix, marker, check);
         if (restored) await verify(guarded.db, bucket, marker, check);
         check(
           "statements",
@@ -249,6 +258,39 @@ export async function runRestoreDrill(bucket: R2Like, options: DrillOptions): Pr
       }
   }
   return { ok: checks.every((c) => c.ok), scratch: name, run, checks, restored, stats };
+}
+
+async function verifyChecksums(
+  bucket: R2Like,
+  prefix: string,
+  marker: CompleteMarker,
+  check: (n: string, ok: boolean, detail: string) => void,
+): Promise<void> {
+  if (!marker.checksums) {
+    check("checksums", true, "this run predates checksums, so its objects were read unchecked");
+    return;
+  }
+  const markerKey = `${prefix}${COMPLETE_MARKER}`;
+  const listed = marker.keys.filter((k) => k !== markerKey);
+  const bare = listed.filter((k) => marker.checksums?.[k] === undefined);
+  const read = new Set([...marker.tables.map((t) => t.key), `${prefix}${SCHEMA_SIDECAR}`]);
+  const wrong: string[] = bare.map((k) => `${k} has no checksum in the marker`);
+  for (const key of listed.filter((k) => !read.has(k) && !bare.includes(k))) {
+    try {
+      const obj = await bucket.get(key);
+      if (!obj?.arrayBuffer) throw new Error(`d1-dump: ${key} cannot be read as bytes`);
+      await verifyChecksum(key, new Uint8Array(await obj.arrayBuffer()), marker.checksums[key]);
+    } catch (err) {
+      wrong.push((err as Error).message);
+    }
+  }
+  check(
+    "checksums",
+    wrong.length === 0,
+    wrong.length > 0
+      ? wrong.join("; ")
+      : `${listed.length} objects, all with a checksum that matches`,
+  );
 }
 
 async function verify(
@@ -318,6 +360,7 @@ async function verify(
       bucket,
       file.key,
       missing,
+      marker.checksums,
     );
     for (const col of cols) {
       const word = wordIn(rows, col.name);

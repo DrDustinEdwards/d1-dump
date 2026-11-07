@@ -72,7 +72,8 @@ function checkColumns(
 // Rebuilds one complete dump into `db`, which should be empty. Tables and FTS5 tables
 // first, then the rows (parents before children), then each external FTS5 index is
 // rebuilt, then indexes, triggers and views, so no trigger fires on restored rows.
-// Every table's count is checked against the marker, and a mismatch throws.
+// Every table's count is checked against the marker, and so is every object's checksum when the marker has
+// them; a mismatch throws.
 export async function restoreDump(
   db: D1Like,
   bucket: R2Like,
@@ -93,6 +94,7 @@ export async function restoreDump(
     bucket,
     `${prefix}${SCHEMA_SIDECAR}`,
     missing,
+    marker.checksums,
   );
   const batchRows = options.batchRows ?? DEFAULT_BATCH_ROWS;
   const batchBytes = options.batchBytes ?? DEFAULT_BATCH_BYTES;
@@ -106,6 +108,7 @@ export async function restoreDump(
       bucket,
       table.key,
       missing,
+      marker.checksums,
     );
     if (rows.length !== table.rows)
       throw new Error(
