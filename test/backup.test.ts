@@ -320,9 +320,7 @@ test("createSiteBackup dumps, copies each bucket and reports one status", async 
     files: [{ name: "journal-revisions", complete: true }],
   });
   const before = await site.status(env, NOW);
-  expect(before.files).toMatchObject({
-    warning: expect.stringContaining("no complete files pass"),
-  });
+  expect(before.files?.media?.warning).toContain("no complete files pass");
   expect(before.warning).toBe("media files: no complete files pass of media found");
   await site.runFilesBackup(env);
   const after = await site.status(env, NOW);
