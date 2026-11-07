@@ -126,9 +126,7 @@ export function scratchName(now: Date, pid: number): string {
   return `${SCRATCH_PREFIX}${now.toISOString().slice(0, 10)}-${pid}`;
 }
 
-function readJson<T>(bucket: R2Like, key: string): Promise<T> {
-  return readDumpJson<T>(bucket, key, (k) => `${k} is missing`);
-}
+const missing = (k: string) => `${k} is missing`;
 
 async function count(db: D1Like, table: string): Promise<number> {
   const { results } = await db
@@ -181,8 +179,8 @@ export async function runRestoreDrill(bucket: R2Like, options: DrillOptions): Pr
   } else {
     run = prefix;
     try {
-      marker = await readJson<CompleteMarker>(bucket, `${prefix}${COMPLETE_MARKER}`);
-      await readJson<SchemaSidecar>(bucket, `${prefix}${SCHEMA_SIDECAR}`);
+      marker = await readDumpJson<CompleteMarker>(bucket, `${prefix}${COMPLETE_MARKER}`, missing);
+      await readDumpJson<SchemaSidecar>(bucket, `${prefix}${SCHEMA_SIDECAR}`, missing);
       const maxAge = options.maxAgeHours === undefined ? DEFAULT_STALE_HOURS : options.maxAgeHours;
       const ageHours = (now.getTime() - Date.parse(marker.exported_at)) / 3_600_000;
       if (maxAge !== null && !(ageHours <= maxAge)) {
@@ -304,7 +302,11 @@ async function verify(
     const { results: cols } = await db
       .prepare(`PRAGMA table_info(${quoteIdent(f.name)})`)
       .all<{ name: string }>();
-    const { rows } = await readJson<{ rows: Array<Record<string, unknown>> }>(bucket, file.key);
+    const { rows } = await readDumpJson<{ rows: Array<Record<string, unknown>> }>(
+      bucket,
+      file.key,
+      missing,
+    );
     for (const col of cols) {
       const word = wordIn(rows, col.name);
       if (!word) continue;
