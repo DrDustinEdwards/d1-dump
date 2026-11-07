@@ -304,14 +304,14 @@ test("excludeIfPresent excludes a table only while it exists, and credentials re
   expect(allowed.dump.complete).toBe(true);
 });
 
-test("createSiteBackup dumps, copies each bucket and reports one status in the shape sites already use", async () => {
+test("createSiteBackup dumps, copies each bucket and reports one status", async () => {
   await media.put("a.txt", "hello");
   const source = bytesSource(media);
   const site = createSiteBackup<{ DB: D1Like; BACKUPS: R2Like & R2FilesLike; MEDIA: R2FilesLike }>({
     dump: { now: NOW, required: ["posts"] },
     files: [
-      { name: "media", source: () => source, label: "media files" },
-      { name: "journal-revisions", key: "revisions", source: (e) => e.BACKUPS, prefix: "journal/" },
+      { name: "media", source: () => source },
+      { name: "journal-revisions", source: (e) => e.BACKUPS, prefix: "journal/" },
     ],
   });
   const env = { DB: src, BACKUPS: bucket as R2Like & R2FilesLike, MEDIA: media };
@@ -326,9 +326,9 @@ test("createSiteBackup dumps, copies each bucket and reports one status in the s
   expect(before.warning).toBe("media files: no complete files pass of media found");
   await site.runFilesBackup(env);
   const after = await site.status(env, NOW);
-  expect(after).toMatchObject({
-    files: { age_hours: expect.any(Number) },
-    revisions: { age_hours: expect.any(Number) },
+  expect(after.files).toMatchObject({
+    media: { age_hours: expect.any(Number) },
+    "journal-revisions": { age_hours: expect.any(Number) },
   });
   expect(after.warning).toBeUndefined();
   await expect(site.runFilesBackup(env, ["nope"])).rejects.toThrow("no files backup named nope");
