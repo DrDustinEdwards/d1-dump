@@ -4,6 +4,7 @@ import {
   BackupIncomplete,
   COMPLETE_MARKER,
   backupFiles,
+  createSiteBackup,
   filesHealth,
   latestDump,
   restoreFiles,
@@ -321,4 +322,45 @@ test("excludeIfPresent excludes a table only while it exists, and credentials re
     credentials: { allow: { "preview_links.token_hash": "a sample reason" } },
   });
   expect(allowed.dump.complete).toBe(true);
+});
+
+test("createSiteBackup dumps, copies each bucket and reports one status in the shape sites already use", async () => {
+  await media.put("a.txt", "hello");
+  // Miniflare drops a stream's length across its proxy (see the files test above), so the source hands over bytes.
+  const source: R2FilesLike = {
+    list: (o) => media.list(o),
+    put: (k, v, o) => media.put(k, v, o),
+    delete: (k) => media.delete(k),
+    get: async (k) => {
+      const o = await media.get(k);
+      if (!o) return null;
+      const body = await new Response(o.body as ReadableStream).arrayBuffer();
+      return { ...o, body, text: async () => "" };
+    },
+  };
+  const site = createSiteBackup<{ DB: D1Like; BACKUPS: R2Like & R2FilesLike; MEDIA: R2FilesLike }>({
+    dump: { now: NOW, required: ["posts"] },
+    files: [
+      { name: "media", source: () => source, label: "media files" },
+      { name: "journal-revisions", key: "revisions", source: (e) => e.BACKUPS, prefix: "journal/" },
+    ],
+  });
+  const env = { DB: src, BACKUPS: bucket as R2Like & R2FilesLike, MEDIA: media };
+  await site.runBackup(env);
+  expect(await site.runFilesBackup(env, ["journal-revisions"])).toMatchObject({
+    files: [{ name: "journal-revisions", complete: true }],
+  });
+  const before = await site.status(env, NOW);
+  expect(before.files).toMatchObject({
+    warning: expect.stringContaining("no complete files pass"),
+  });
+  expect(before.warning).toBe("media files: no complete files pass of media found");
+  await site.runFilesBackup(env);
+  const after = await site.status(env, NOW);
+  expect(after).toMatchObject({
+    files: { age_hours: expect.any(Number) },
+    revisions: { age_hours: expect.any(Number) },
+  });
+  expect(after.warning).toBeUndefined();
+  await expect(site.runFilesBackup(env, ["nope"])).rejects.toThrow("no files backup named nope");
 });
