@@ -316,13 +316,13 @@ test("createSiteBackup dumps, copies each bucket and reports one status", async 
   });
   const env = { DB: src, BACKUPS: bucket as R2Like & R2FilesLike, MEDIA: media };
   await site.runBackup(env);
-  expect(await site.runFilesBackup(env, ["journal-revisions"])).toMatchObject({
+  expect(await site.runFilesBackup(env, ["journal-revisions"], NOW)).toMatchObject({
     files: [{ name: "journal-revisions", complete: true }],
   });
   const before = await site.status(env, NOW);
   expect(before.files?.media?.warning).toContain("no complete files pass");
   expect(before.warning).toBe("media files: no complete files pass of media found");
-  await site.runFilesBackup(env);
+  await site.runFilesBackup(env, undefined, NOW);
   const after = await site.status(env, NOW);
   expect(after.files).toMatchObject({
     media: { age_hours: expect.any(Number) },

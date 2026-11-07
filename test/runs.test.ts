@@ -365,3 +365,15 @@ test("prune still throws on a delete failure that is not a lock refusal", async 
     "Internal Error (10001)",
   );
 });
+
+test("a prune never empties the bucket or touches a folder that is not a run, and a future stamp is warned about", async () => {
+  const only = await run("2026-01-05T04:00:00Z", true);
+  await bucket.put(`${P}hold-before-migration/x.json`, "{}");
+  const flat = await pruneDumps(bucket, { now: new Date("2026-11-07T00:00:00Z"), minKept: 0 });
+  expect(flat.pruned).toBe(0);
+  expect(await runIds()).toEqual([only, "hold-before-migration"].sort());
+
+  await run("2099-01-01T00:00:00Z", true);
+  const health = await backupHealth(bucket, { now: new Date("2026-11-07T00:00:00Z") });
+  expect(health.warning).toMatch(/future/);
+});

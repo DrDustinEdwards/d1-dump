@@ -13,6 +13,9 @@ export const DEFAULT_STALE_HOURS = 26;
 export const DEFAULT_RETENTION_DAYS = 90;
 export const DEFAULT_MIN_KEPT = 14;
 
+// What runIdFor writes. A folder under the prefix with any other name is not a run, so a prune never selects it.
+const RUN_ID = /^\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z$/;
+
 // Run id -> its keys, newest run first. A run id is the ISO time with ':' and '.'
 // replaced, so it sorts as the time does.
 async function runsOf(
@@ -22,7 +25,7 @@ async function runsOf(
   const byRun = new Map<string, string[]>();
   for (const key of await listAllKeys(bucket, prefix)) {
     const id = key.slice(prefix.length).split("/")[0];
-    if (!id || !key.slice(prefix.length).includes("/")) continue;
+    if (!RUN_ID.test(id) || !key.slice(prefix.length).includes("/")) continue;
     byRun.set(id, [...(byRun.get(id) ?? []), key]);
   }
   return [...byRun.entries()]
@@ -128,6 +131,9 @@ export async function backupHealth(
   return ageOf(latest.exported_at, options.now ?? new Date(), staleHours, "dump");
 }
 
+// A stamp this far ahead of the reader is a wrong clock; less is ordinary skew between a Worker and its reader.
+const CLOCK_SKEW_MS = 5 * 60_000;
+
 // The BackupHealth of a stamped time: its age, and a warning past staleHours or when it is not a time.
 export function ageOf(stamp: string, now: Date, staleHours: number, what: string): BackupHealth {
   const stamped = Date.parse(stamp);
@@ -140,6 +146,10 @@ export function ageOf(stamp: string, now: Date, staleHours: number, what: string
   const ageMs = now.getTime() - stamped;
   const ageHours = Math.round((ageMs / 3_600_000) * 10) / 10;
   const result: BackupHealth = { last_ok: stamp, age_hours: ageHours };
+  if (ageMs < -CLOCK_SKEW_MS) {
+    result.warning = `the newest ${what}'s time is ${-ageHours}h in the future (a wrong clock), so its age cannot be trusted`;
+    return result;
+  }
   if (ageMs > staleHours * 3_600_000)
     result.warning = `last complete ${what} was ${ageHours}h ago, over the ${staleHours}h threshold`;
   return result;
@@ -242,7 +252,10 @@ export function selectStaleRuns(runs: RunRef[], options: SelectOptions = {}): st
   if (options.retentionDays !== undefined || options.minKept !== undefined) {
     const retentionDays = options.retentionDays ?? DEFAULT_RETENTION_DAYS;
     const minKept = options.minKept ?? DEFAULT_MIN_KEPT;
-    const floor = new Set(complete.slice(0, minKept).map((r) => r.id));
+    const floor = new Set([
+      complete[0].id,
+      ...complete.slice(0, Math.max(0, Math.floor(minKept) || 0)).map((r) => r.id),
+    ]);
     const cutoffDay = new Date(now.getTime() - retentionDays * DAY_MS).toISOString().slice(0, 10);
     stale = sorted.filter((r) => !floor.has(r.id) && r.id.slice(0, 10) < cutoffDay);
   } else {
