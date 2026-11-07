@@ -14,7 +14,7 @@ import {
   type R2FilesLike,
   type R2Like,
 } from "../src/index.js";
-import { SITE_ROWS, SITE_SCHEMA, exec, sandbox } from "./helpers.js";
+import { SITE_ROWS, SITE_SCHEMA, bytesSource, exec, sandbox } from "./helpers.js";
 
 let src: D1Like;
 let bucket: R2Like;
@@ -121,27 +121,7 @@ test("a counted table must match its live count, and all counted tables empty is
 
 test("files are copied once, re-copied when changed, and a deleted one is kept for its window, then removed", async () => {
   const backup = bucket as unknown as R2FilesLike;
-  // Miniflare's proxy from Node back into workerd drops a stream's length, which a Worker's
-  // own R2 body keeps and put requires, so here the copy is handed the bytes.
-  const source: R2FilesLike = {
-    list: (o) => media.list(o),
-    put: (k, v, o) => media.put(k, v, o),
-    delete: (k) => media.delete(k),
-    get: async (k) => {
-      const o = await media.get(k);
-      if (!o) return null;
-      const bytes = await new Response(o.body as ReadableStream).arrayBuffer();
-      return {
-        key: o.key,
-        etag: o.etag,
-        size: o.size,
-        httpMetadata: o.httpMetadata,
-        customMetadata: o.customMetadata,
-        body: bytes,
-        text: async () => "",
-      };
-    },
-  };
+  const source = bytesSource(media);
   const day = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
   const photo = new Uint8Array(3 * 1024 * 1024).map((_, i) => i % 251);
   await media.put("a.txt", "first", {
@@ -326,18 +306,7 @@ test("excludeIfPresent excludes a table only while it exists, and credentials re
 
 test("createSiteBackup dumps, copies each bucket and reports one status in the shape sites already use", async () => {
   await media.put("a.txt", "hello");
-  // Miniflare drops a stream's length across its proxy (see the files test above), so the source hands over bytes.
-  const source: R2FilesLike = {
-    list: (o) => media.list(o),
-    put: (k, v, o) => media.put(k, v, o),
-    delete: (k) => media.delete(k),
-    get: async (k) => {
-      const o = await media.get(k);
-      if (!o) return null;
-      const body = await new Response(o.body as ReadableStream).arrayBuffer();
-      return { ...o, body, text: async () => "" };
-    },
-  };
+  const source = bytesSource(media);
   const site = createSiteBackup<{ DB: D1Like; BACKUPS: R2Like & R2FilesLike; MEDIA: R2FilesLike }>({
     dump: { now: NOW, required: ["posts"] },
     files: [
