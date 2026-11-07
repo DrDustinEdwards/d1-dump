@@ -9,7 +9,7 @@ Each site installs it. D1 Time Travel already restores any minute of the last 30
 Installed by git tag, never from a registry:
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.11.0
+npm install github:DrDustinEdwards/d1-dump#v0.14.0
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -46,6 +46,28 @@ const backup = await backupHealth(env.BACKUPS);
 ```
 
 It warns past 26 hours by default (`staleHours`), and never throws. It lists nothing: each marker write also points the pointer beside the prefix (`backups/json_latest.json` for the default `backups/json/`) at its run, and `latestDump` reads that pointer and the marker it names, two gets. A list is a Class A operation in R2 and a get Class B, and a health route on a custom domain is read from many data centers, so the Cache API cannot hold one listing for all of them. The pointer is outside the prefix because it is the one object a run overwrites, and a bucket lock rule on the prefix would refuse that (error 10069) on every run after the first. Only when the pointer is missing (runs written before 0.13.2) or names a run whose marker is gone does it list the bucket once, grouped by run (`delimiter: "/"`), and read the newest runs' markers.
+
+## One call for a site's whole backup
+
+A site's backup module is the same three functions: the nightly checked dump, a files pass per bucket, and the status `/health` and the operator API read. `createSiteBackup` holds that wiring, so a site states only its tables and its buckets:
+
+```ts
+import { createSiteBackup } from "@dustinedwards/d1-dump";
+
+export const backup = createSiteBackup<Env>({
+  dump: { exclude: ["session"], required: ["posts"], credentials: true }, // runCheckedBackup's options
+  files: [
+    { name: "media", source: (env) => env.MEDIA, timeBudgetMs: 180_000, label: "media files" },
+    { name: "covers", source: (env) => env.COVERS, label: "cover files" },
+  ],
+});
+
+await backup.runBackup(env); // the checked dump; throws BackupIncomplete
+await backup.runFilesBackup(env); // every files pass; or runFilesBackup(env, ["covers"]) for one
+const status = await backup.status(env); // { last_ok, age_hours, files, covers, warning? }
+```
+
+The database and bucket default to `env.DB` and `env.BACKUPS`; pass `db` and `bucket` to read others. Each files option is `backupFiles`' (`name`, `prefix`, `maxObjects`, `timeBudgetMs`, `keepDeletedDays`) plus `source`. `status` is `backupHealth` with each pass's `filesHealth` under a key: `files` for the first pass and its `name` for the others, unless `key` says otherwise (a site that already reports `revisions` keeps that key). `warning` is the dump's, else the first stale pass's, prefixed with its `label` when the site has several passes. It never throws. Two passes with one name or one key throw when the backup is created, not at 03:00.
 
 ## Back up files
 
