@@ -126,9 +126,7 @@ export function scratchName(now: Date, pid: number): string {
   return `${SCRATCH_PREFIX}${now.toISOString().slice(0, 10)}-${pid}`;
 }
 
-function readJson<T>(bucket: R2Like, key: string): Promise<T> {
-  return readDumpJson<T>(bucket, key, (k) => `${k} is missing`);
-}
+const missing = (k: string) => `${k} is missing`;
 
 async function count(db: D1Like, table: string): Promise<number> {
   const { results } = await db
@@ -173,16 +171,22 @@ export async function runRestoreDrill(bucket: R2Like, options: DrillOptions): Pr
   let restored: RestoreResult | null = null;
   let stats: StatementStats | null = null;
 
-  const latest = options.prefix ? null : await latestDump(bucket);
+  let latest: Awaited<ReturnType<typeof latestDump>> = null;
+  let unreadable: string | null = null;
+  try {
+    latest = options.prefix ? null : await latestDump(bucket);
+  } catch (err) {
+    unreadable = (err as Error).message;
+  }
   const prefix = options.prefix ?? latest?.prefix ?? null;
   let marker: CompleteMarker | null = null;
   if (!prefix) {
-    check("dump", false, "no complete dump found");
+    check("dump", false, unreadable ?? "no complete dump found");
   } else {
     run = prefix;
     try {
-      marker = await readJson<CompleteMarker>(bucket, `${prefix}${COMPLETE_MARKER}`);
-      await readJson<SchemaSidecar>(bucket, `${prefix}${SCHEMA_SIDECAR}`);
+      marker = await readDumpJson<CompleteMarker>(bucket, `${prefix}${COMPLETE_MARKER}`, missing);
+      await readDumpJson<SchemaSidecar>(bucket, `${prefix}${SCHEMA_SIDECAR}`, missing);
       const maxAge = options.maxAgeHours === undefined ? DEFAULT_STALE_HOURS : options.maxAgeHours;
       const ageHours = (now.getTime() - Date.parse(marker.exported_at)) / 3_600_000;
       if (maxAge !== null && !(ageHours <= maxAge)) {
@@ -205,38 +209,44 @@ export async function runRestoreDrill(bucket: R2Like, options: DrillOptions): Pr
   }
 
   if (prefix && marker) {
-    const scratch = await options.createScratch(name);
+    let scratch: Scratch | null = null;
     try {
-      const guarded = guardStatements(scratch.db);
-      stats = guarded.stats;
-      try {
-        restored = await restoreDump(guarded.db, bucket, prefix, options.restore);
-        check(
-          "restore",
-          true,
-          `${restored.tables.length} tables, ${restored.rebuilt.length} FTS5 indexes rebuilt, ${restored.empty.length} contentless left empty`,
-        );
-      } catch (err) {
-        check("restore", false, (err as Error).message);
-      }
-      if (restored) await verify(guarded.db, bucket, marker, check);
-      check(
-        "statements",
-        stats.statements > 0 && stats.maxStatementBytes <= D1_MAX_STATEMENT_BYTES,
-        `${stats.statements} statements in ${stats.batches} batches, longest ${stats.maxStatementBytes} bytes of ${D1_MAX_STATEMENT_BYTES}; largest bound value ${stats.maxBoundValue}, most bound by one batch ${stats.maxBatchBound}`,
-      );
-    } finally {
-      try {
-        await scratch.delete();
-        check("scratch", true, `${name} deleted`);
-      } catch (err) {
-        check(
-          "scratch",
-          false,
-          `${name} was NOT deleted, delete it by hand: ${(err as Error).message}`,
-        );
-      }
+      scratch = await options.createScratch(name);
+    } catch (err) {
+      check("scratch", false, (err as Error).message);
     }
+    if (scratch)
+      try {
+        const guarded = guardStatements(scratch.db);
+        stats = guarded.stats;
+        try {
+          restored = await restoreDump(guarded.db, bucket, prefix, options.restore);
+          check(
+            "restore",
+            true,
+            `${restored.tables.length} tables, ${restored.rebuilt.length} FTS5 indexes rebuilt, ${restored.empty.length} contentless left empty`,
+          );
+        } catch (err) {
+          check("restore", false, (err as Error).message);
+        }
+        if (restored) await verify(guarded.db, bucket, marker, check);
+        check(
+          "statements",
+          stats.statements > 0 && stats.maxStatementBytes <= D1_MAX_STATEMENT_BYTES,
+          `${stats.statements} statements in ${stats.batches} batches, longest ${stats.maxStatementBytes} bytes of ${D1_MAX_STATEMENT_BYTES}; largest bound value ${stats.maxBoundValue}, most bound by one batch ${stats.maxBatchBound}`,
+        );
+      } finally {
+        try {
+          await scratch.delete();
+          check("scratch", true, `${name} deleted`);
+        } catch (err) {
+          check(
+            "scratch",
+            false,
+            `${name} was NOT deleted, delete it by hand: ${(err as Error).message}`,
+          );
+        }
+      }
   }
   return { ok: checks.every((c) => c.ok), scratch: name, run, checks, restored, stats };
 }
@@ -304,7 +314,11 @@ async function verify(
     const { results: cols } = await db
       .prepare(`PRAGMA table_info(${quoteIdent(f.name)})`)
       .all<{ name: string }>();
-    const { rows } = await readJson<{ rows: Array<Record<string, unknown>> }>(bucket, file.key);
+    const { rows } = await readDumpJson<{ rows: Array<Record<string, unknown>> }>(
+      bucket,
+      file.key,
+      missing,
+    );
     for (const col of cols) {
       const word = wordIn(rows, col.name);
       if (!word) continue;

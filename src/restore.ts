@@ -36,9 +36,7 @@ function boundSize(v: unknown): number {
   return typeof v === "string" || Array.isArray(v) ? v.length : 8;
 }
 
-function readJson<T>(bucket: R2Like, key: string): Promise<T> {
-  return readDumpJson<T>(bucket, key, (k) => `d1-dump: ${k} is missing from the dump`);
-}
+const missing = (k: string) => `d1-dump: ${k} is missing from the dump`;
 
 // The columns the restored table has, from the CREATE statement in _schema.json that was
 // just run. An internal FTS5 table is dumped with its rowid too.
@@ -82,14 +80,20 @@ export async function restoreDump(
   options: RestoreOptions = {},
 ): Promise<RestoreResult> {
   const prefix = runPrefix.endsWith("/") ? runPrefix : `${runPrefix}/`;
-  const marker = await readJson<CompleteMarker>(bucket, `${prefix}${COMPLETE_MARKER}`).catch(
-    (err: Error) => {
-      throw new Error(
-        `d1-dump: ${prefix} has no readable ${COMPLETE_MARKER}, so it is not a complete dump (${err.message})`,
-      );
-    },
+  const marker = await readDumpJson<CompleteMarker>(
+    bucket,
+    `${prefix}${COMPLETE_MARKER}`,
+    missing,
+  ).catch((err: Error) => {
+    throw new Error(
+      `d1-dump: ${prefix} has no readable ${COMPLETE_MARKER}, so it is not a complete dump (${err.message})`,
+    );
+  });
+  const { schema } = await readDumpJson<SchemaSidecar>(
+    bucket,
+    `${prefix}${SCHEMA_SIDECAR}`,
+    missing,
   );
-  const { schema } = await readJson<SchemaSidecar>(bucket, `${prefix}${SCHEMA_SIDECAR}`);
   const batchRows = options.batchRows ?? DEFAULT_BATCH_ROWS;
   const batchBytes = options.batchBytes ?? DEFAULT_BATCH_BYTES;
 
@@ -98,7 +102,11 @@ export async function restoreDump(
 
   const restored: RestoreResult["tables"] = [];
   for (const table of marker.tables) {
-    const { rows } = await readJson<{ rows: Array<Record<string, unknown>> }>(bucket, table.key);
+    const { rows } = await readDumpJson<{ rows: Array<Record<string, unknown>> }>(
+      bucket,
+      table.key,
+      missing,
+    );
     if (rows.length !== table.rows)
       throw new Error(
         `d1-dump: ${table.key} holds ${rows.length} rows, the marker says ${table.rows}`,
