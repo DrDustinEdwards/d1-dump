@@ -91,3 +91,19 @@ export async function readBytes(bucket: R2Like, key: string): Promise<ArrayBuffe
   if (!obj?.arrayBuffer) throw new Error(`no object with bytes at ${key}`);
   return obj.arrayBuffer();
 }
+
+// Miniflare's proxy from Node back into workerd drops a stream's length, which a Worker's own R2
+// body keeps and put requires, so a files backup is handed the bytes instead of the stream.
+export function bytesSource(media: R2FilesLike): R2FilesLike {
+  return {
+    list: (o) => media.list(o),
+    put: (k, v, o) => media.put(k, v, o),
+    delete: (k) => media.delete(k),
+    get: async (k) => {
+      const o = await media.get(k);
+      if (!o) return null;
+      const body = await new Response(o.body as ReadableStream).arrayBuffer();
+      return { ...o, body, text: async () => "" };
+    },
+  };
+}
