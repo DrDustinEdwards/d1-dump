@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import {
   COMPLETE_MARKER,
-  LATEST_POINTER,
   backupHealth,
   latestDump,
+  latestPointerKey,
   pruneDumps,
   runIdFor,
   selectStaleRuns,
@@ -57,14 +57,22 @@ test("backup health reports the newest complete dump in Capsid's /health shape, 
   // However many files each run holds, the runs are named by one list call.
   for (let i = 0; i < 5; i++) await bucket.put(`${P}2026-09-26T09-00-00-000Z/t${i}.json`, "{}");
   let lists = 0;
+  // A bucket lock rule on the prefix, as every site's backups bucket has (backups-json-13d): R2
+  // refuses to overwrite an object it holds, error 10069. The pointer lived under the prefix
+  // until 0.13.2, so every run after the first failed writing it.
   const counted: R2Like = {
     ...bucket,
     list: (o) => (lists++, bucket.list(o)),
     get: (k) => bucket.get(k),
+    put: async (k, v, o) => {
+      if (k.startsWith(P) && (await bucket.get(k)))
+        throw new Error("put: The object is locked by the bucket policy. (10069)");
+      return bucket.put(k, v, o);
+    },
   };
   expect((await latestDump(counted))?.run_id).toBe("2026-09-26T09-00-00-000Z");
   expect(lists).toBe(1);
-  // Each marker write points _latest.json at its run, and then the newest dump is found with no list.
+  // Each marker write points the pointer beside the prefix at its run, and then the newest dump is found with no list.
   const marked = async (at: string) => {
     const run_id = runIdFor(new Date(at));
     const dump: DumpResult = {
@@ -78,7 +86,7 @@ test("backup health reports the newest complete dump in Capsid's /health shape, 
       shadow_skipped: [],
       complete: false,
     };
-    await writeCompleteMarker(bucket, dump);
+    await writeCompleteMarker(counted, dump);
     return run_id;
   };
   lists = 0;
@@ -94,9 +102,8 @@ test("backup health reports the newest complete dump in Capsid's /health shape, 
   await bucket.delete(`${P}${newer}/${COMPLETE_MARKER}`);
   expect((await latestDump(counted))?.run_id).toBe("2026-09-26T09-00-00-000Z");
   expect(lists).toBe(1);
-  expect((await bucket.list({ prefix: P, delimiter: "/" })).objects.map((o) => o.key)).toEqual([
-    `${P}${LATEST_POINTER}`,
-  ]);
+  expect(await bucket.get(latestPointerKey(P))).not.toBeNull();
+  expect((await bucket.list({ prefix: P, delimiter: "/" })).objects).toEqual([]);
 });
 
 test("backup health with no complete dump is a warning, not a missing field", async () => {

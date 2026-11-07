@@ -2,6 +2,7 @@ export {
   COMPLETE_MARKER,
   DEFAULT_PREFIX,
   LATEST_POINTER,
+  latestPointerKey,
   SCHEMA_SIDECAR,
   dumpDatabase,
   runIdFor,
