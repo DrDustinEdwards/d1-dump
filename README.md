@@ -70,6 +70,26 @@ The source is walked in key order beside the backup's copies, so a copy with no 
 
 **Bucket locks.** R2 refuses to delete or overwrite an object a lock rule still holds (error 10069). A removal or a re-copy that a lock refuses is counted in `locked` and tried again by the next pass; the run goes on. Any other failure throws, and the next run resumes from the last saved key.
 
+## A site's whole backup, declared once
+
+`siteBackup` wraps the dump, the files passes, the scheduled jobs that run them and the health reading, so a site writes the declaration and no glue:
+
+```ts
+import { siteBackup } from "@dustinedwards/d1-dump";
+
+export const backup = siteBackup<Env>({
+  db: (env) => env.DB,
+  bucket: (env) => env.BACKUPS,
+  dump: { required: ["posts"], exclude: ["preview_links"], credentials: true },
+  files: [{ name: "media", source: (env) => env.MEDIA }],
+});
+
+backup.jobs(env); // [{ name: "backup", backup: true, ... }, { name: "media-backup", ... }] for site-runtime's runJobs
+await backup.status(env); // /health and the operator's backup_status: the dump and every pass, one warning
+```
+
+The files pass stops itself at `timeBudgetMs` (three minutes) inside its job's `timeoutMs` (four), and the dump job has five.
+
 ## Restore files
 
 ```ts

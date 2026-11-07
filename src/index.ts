@@ -82,3 +82,10 @@ export {
   type Scratch,
   type StatementStats,
 } from "./drill.js";
+export {
+  siteBackup,
+  type BackupJob,
+  type SiteBackupFiles,
+  type SiteBackupSpec,
+  type SiteBackupStatus,
+} from "./site-backup.js";
