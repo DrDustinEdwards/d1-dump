@@ -1,11 +1,10 @@
 name: ci
 
-# Typecheck, lint and every test, on each pull request and each push to main. The tests run
-# real D1 and R2 in Miniflare and hold no secret.
+# Typecheck, lint and every test, on each pull request. The tests run real D1 and R2 in Miniflare and hold no secret.
+# No push to main: the merge was checked as its pull request, and nothing deploys from main (a release is the tag
+# release.yml makes from the merge of a version bump). devkit README, "No second run on main".
 on:
   pull_request:
-  push:
-    branches: [main]
 
 permissions:
   contents: read

@@ -1,18 +1,18 @@
 name: code-map
 
-# After each push to main, devkit's shared code-map workflow measures this repository's modules and functions and
-# publishes code-map.json to the code-map branch, where the Capsid system explorer reads it. Never a gate on a pull request.
-# Once a week (and on a manual run) it also runs the Stryker chunks of stryker.config.mjs; a push reuses that run's
-# numbers and marks a function changed since as stale.
+# Nightly, devkit's shared code-map workflow measures this repository's modules and functions and publishes code-map.json
+# to the code-map branch, where the Capsid system explorer reads it. Never a gate on a pull request. Not on every push: a
+# run per merge took a runner while the account's 20 were the bottleneck (devkit README, "No second run on main").
+# Monday's run (its own cron line) and a manual one also run the Stryker chunks of stryker.config.mjs; the other nights
+# reuse its numbers and mark a function changed since as stale.
 
 on:
-  push:
-    branches: [main]
   schedule:
+    - cron: "17 4 * * 0,2-6"
     - cron: "17 4 * * 1"
   workflow_dispatch:
 
-# One run at a time, so a push's map never overwrites the weekly mutation run while it is still going.
+# One run at a time, so a nightly map never overwrites the weekly mutation run while it is still going.
 concurrency:
   group: code-map
   cancel-in-progress: false
@@ -28,6 +28,6 @@ jobs:
     uses: DrDustinEdwards/devkit/.github/workflows/code-map.yml@a5562b298a5aa36f32c336ca153d47da09306862 # v0.24.1
     with:
       coverage-command: npx vitest run --coverage.enabled --coverage.provider=v8 --coverage.reporter=json --coverage.include=src/**
-      mutation-command: ${{ github.event_name != 'push' && 'npm i --no-save @stryker-mutator/core@9.6.1 @stryker-mutator/vitest-runner@9.6.1 && for c in drill dump restore runs rest; do STRYKER_CHUNK=$c npx stryker run; done' || '' }}
+      mutation-command: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 4 * * 1') && 'npm i --no-save @stryker-mutator/core@9.6.1 @stryker-mutator/vitest-runner@9.6.1 && for c in drill dump restore runs rest; do STRYKER_CHUNK=$c npx stryker run; done' || '' }}
       mutation-file: reports/mutation/*.json
-      timeout-minutes: ${{ github.event_name != 'push' && 120 || 20 }}
+      timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 4 * * 1') && 120 || 20 }}
