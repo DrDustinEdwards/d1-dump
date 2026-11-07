@@ -70,6 +70,7 @@ test("a good dump passes every check, and the scratch database is deleted", asyn
   expect(result.checks.map((c) => c.name)).toEqual([
     "dump",
     "restore",
+    "checksums",
     "counts",
     "fts",
     "search",
@@ -247,6 +248,17 @@ test("a row lost after the restore's own count check fails the drill's recount",
     ok: false,
     detail: "comments has 2, the marker says 3",
   });
+  expect(result.ok).toBe(false);
+});
+
+test("an object changed after the dump, with its row count intact, fails the restore on its checksum", async () => {
+  const dumped = await dumpDatabase(src, bucket, { now: NOW });
+  const key = dumped.tables.find((t) => t.name === "comments")?.key ?? "";
+  const body = await readText(bucket, key);
+  await bucket.put(key, body.replace("agreed", "AGREED"));
+  const result = await runRestoreDrill(bucket, { ...scratchOf(dst), now: LATER });
+  expect(checkOf(result, "restore").ok).toBe(false);
+  expect(checkOf(result, "restore").detail).toMatch(/comments\.json does not match its checksum/);
   expect(result.ok).toBe(false);
 });
 

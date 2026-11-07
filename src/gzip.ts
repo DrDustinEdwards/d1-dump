@@ -1,3 +1,4 @@
+import { verifyChecksum } from "./checksum.js";
 import type { R2Like } from "./types.js";
 
 export const GZIP_TYPE = { httpMetadata: { contentType: "application/gzip" } };
@@ -16,16 +17,21 @@ async function gunzipText(bytes: ArrayBuffer | Uint8Array): Promise<string> {
 }
 
 // Reads one object of a dump as JSON. A key ending in .gz holds gzip bytes, so a run written with
-// `compress` and a run written before it are restored by the same code.
+// `compress` and a run written before it are restored by the same code. With `checksums` (the marker's),
+// the stored bytes must hash to the value the marker records for the key, or this throws; a marker
+// written before checksums existed has none, and then nothing is checked.
 export async function readDumpJson<T>(
   bucket: R2Like,
   key: string,
   missing: (key: string) => string,
+  checksums?: Record<string, string>,
 ): Promise<T> {
   const obj = await bucket.get(key);
   if (!obj) throw new Error(missing(key));
-  if (!key.endsWith(".gz")) return JSON.parse(await obj.text()) as T;
-  if (!obj.arrayBuffer)
-    throw new Error(`d1-dump: ${key} is gzip, and this bucket cannot read an object's bytes`);
-  return JSON.parse(await gunzipText(await obj.arrayBuffer())) as T;
+  const gz = key.endsWith(".gz");
+  if (!gz && !checksums) return JSON.parse(await obj.text()) as T;
+  if (!obj.arrayBuffer) throw new Error(`d1-dump: ${key} cannot be read as bytes from this bucket`);
+  const bytes = new Uint8Array(await obj.arrayBuffer());
+  if (checksums) await verifyChecksum(key, bytes, checksums[key]);
+  return JSON.parse(gz ? await gunzipText(bytes) : new TextDecoder().decode(bytes)) as T;
 }

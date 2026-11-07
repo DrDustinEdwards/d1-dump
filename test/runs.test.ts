@@ -83,6 +83,7 @@ test("backup health reports the newest complete dump in Capsid's /health shape, 
       tables: [],
       fts: [],
       excluded: [],
+      checksums: {},
       shadow_skipped: [],
       complete: false,
     };

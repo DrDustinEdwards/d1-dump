@@ -17,6 +17,7 @@ import {
   rows,
   sandbox,
   tableKey,
+  rewriteTable,
 } from "./helpers.js";
 
 let src: D1Like;
@@ -182,9 +183,7 @@ test("a failed write leaves no marker, so the run is not a complete dump", async
 test("a restore whose table file lost rows is refused", async () => {
   const dumped = await dumpDatabase(src, bucket, { now: NOW });
   const key = tableKey(dumped, "comments");
-  const file = JSON.parse(await readText(bucket, key));
-  file.rows.pop();
-  await bucket.put(key, JSON.stringify(file));
+  await rewriteTable(bucket, dumped, key, (file) => void file.rows.pop());
   await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(
     /comments\.json holds 2 rows, the marker says 3/,
   );

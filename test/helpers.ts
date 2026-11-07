@@ -1,4 +1,5 @@
 import { Miniflare } from "miniflare";
+import { checksumOf } from "../src/checksum.js";
 import type { D1Like, DrillResult, R2FilesLike, R2Like, StatementStats } from "../src/index.js";
 
 // Real D1 (SQLite with FTS5) and R2, in-process, as workerd runs them.
@@ -106,4 +107,24 @@ export function bytesSource(media: R2FilesLike): R2FilesLike {
       return { ...o, body, text: async () => "" };
     },
   };
+}
+
+/**
+ * Rewrites a dumped table file and re-seals the marker with the new bytes' checksum, as a writer who also
+ * rewrote the marker would, so a test can reach the checks that run after the checksum one.
+ */
+export async function rewriteTable(
+  bucket: R2Like,
+  dumped: { prefix: string },
+  key: string,
+  change: (file: { rows: Array<Record<string, unknown>> }) => void,
+): Promise<void> {
+  const file = JSON.parse(await readText(bucket, key));
+  change(file);
+  const body = JSON.stringify(file);
+  await bucket.put(key, body);
+  const markerKey = `${dumped.prefix}_complete.json`;
+  const marker = JSON.parse(await readText(bucket, markerKey));
+  marker.checksums[key] = await checksumOf(new TextEncoder().encode(body));
+  await bucket.put(markerKey, JSON.stringify(marker));
 }

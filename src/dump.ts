@@ -1,5 +1,5 @@
 import { GZIP_TYPE, gzipText } from "./gzip.js";
-import { JSON_TYPE, putJsonStreamed } from "./r2.js";
+import { JSON_TYPE, putChecked, putJsonStreamed } from "./r2.js";
 import { quoteIdent, readPlan, type FtsTable, type SchemaEntry } from "./schema.js";
 import type { D1Like, R2Like } from "./types.js";
 
@@ -70,6 +70,8 @@ export interface DumpResult {
   tables: DumpedTable[];
   fts: FtsTable[];
   excluded: string[];
+  // SHA-256 of each object written so far, by key (see checksum.ts). The marker carries them.
+  checksums: Record<string, string>;
   shadow_skipped: string[];
   // Whether _complete.json was written. When false, `keys` lists every object written
   // and no marker.
@@ -79,6 +81,10 @@ export interface DumpResult {
 export interface CompleteMarker {
   exported_at: string;
   keys: string[];
+  // SHA-256 of every object in `keys` except this marker, by key. Absent in a run written before
+  // checksums existed; restore and the drill check what it names. It catches a damaged or truncated
+  // object, not a writer who can also rewrite the marker.
+  checksums?: Record<string, string>;
   tables: DumpedTable[];
   fts: FtsTable[];
   excluded: string[];
@@ -170,6 +176,7 @@ export async function dumpDatabase(
   );
 
   const keys: string[] = [];
+  const checksums: Record<string, string> = {};
   const tables: DumpedTable[] = [];
   for (let i = 0; i < targets.length; i++) {
     const table = targets[i];
@@ -181,7 +188,7 @@ export async function dumpDatabase(
       const first = results[0] as { max_id: number | null; n: number } | undefined;
       const maxId = Number(first?.max_id ?? Number.NaN);
       const head = `{"exported_at":${JSON.stringify(exportedAt)},"table":${JSON.stringify(table)},"rows":[`;
-      rows = Number.isNaN(maxId)
+      const written = Number.isNaN(maxId)
         ? await putJsonStreamed(bucket, key, head, (async function* () {})(), compress)
         : await putJsonStreamed(
             bucket,
@@ -190,6 +197,8 @@ export async function dumpDatabase(
             pages(db, table, p.idColumn, maxId, p.pageRows),
             compress,
           );
+      rows = written.rows;
+      checksums[key] = written.checksum;
       // Fewer rows than the snapshot held means a repeated id was skipped or rows went away mid-dump: not a backup.
       const expected = Number(first?.n ?? 0);
       if (rows !== expected)
@@ -198,8 +207,9 @@ export async function dumpDatabase(
         );
     } else {
       const body = JSON.stringify({ exported_at: exportedAt, table, rows: results });
-      if (compress) await bucket.put(key, await gzipText(body), GZIP_TYPE);
-      else await bucket.put(key, body, JSON_TYPE);
+      checksums[key] = compress
+        ? await putChecked(bucket, key, await gzipText(body), GZIP_TYPE)
+        : await putChecked(bucket, key, body, JSON_TYPE);
       rows = results.length;
     }
     keys.push(key);
@@ -209,7 +219,8 @@ export async function dumpDatabase(
   }
 
   const schemaKey = `${runPrefix}${SCHEMA_SIDECAR}`;
-  await bucket.put(
+  checksums[schemaKey] = await putChecked(
+    bucket,
     schemaKey,
     JSON.stringify({ exported_at: exportedAt, schema: plan.schema } satisfies SchemaSidecar),
     JSON_TYPE,
@@ -217,7 +228,8 @@ export async function dumpDatabase(
   keys.push(schemaKey);
   for (const [file, value] of Object.entries(sidecarsOf(options))) {
     const key = `${runPrefix}${file}`;
-    await bucket.put(
+    checksums[key] = await putChecked(
+      bucket,
       key,
       JSON.stringify({ exported_at: exportedAt, ...(value as object) }),
       JSON_TYPE,
@@ -233,6 +245,7 @@ export async function dumpDatabase(
     tables,
     fts: plan.fts,
     excluded: exclude,
+    checksums,
     shadow_skipped: plan.shadow,
     complete: false,
   };
@@ -252,6 +265,7 @@ export async function writeCompleteMarker(bucket: R2Like, result: DumpResult): P
     tables: result.tables,
     fts: result.fts,
     excluded: result.excluded,
+    checksums: result.checksums,
   };
   await bucket.put(key, JSON.stringify(marker), JSON_TYPE);
   result.keys.push(key);

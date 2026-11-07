@@ -5,7 +5,6 @@ import {
   dumpDatabase,
   restoreDump,
   runRestoreDrill,
-  writeCompleteMarker,
   type D1Like,
   type R2Like,
 } from "../src/index.js";
@@ -15,11 +14,11 @@ import {
   SITE_SCHEMA,
   checkOf,
   exec,
-  readText,
   rows,
   sandbox,
   statsOf,
   tableKey,
+  rewriteTable,
 } from "./helpers.js";
 
 // The same drill against the tokenless backend: a local SQLite file (node:sqlite).
@@ -78,6 +77,7 @@ test("sqlite: a good dump passes every check, and a BLOB comes back as a BLOB", 
   expect(result.checks.map((c) => c.name)).toEqual([
     "dump",
     "restore",
+    "checksums",
     "counts",
     "fts",
     "search",
@@ -173,12 +173,11 @@ test("the backend is sqlite without credentials, d1 with them, and either can be
 // A column dropped from EVERY row of a table: row 0 agrees with its siblings, so only the
 // schema can say it is missing.
 test("a column missing from every row of a table is refused, naming it", async () => {
-  const dumped = await dumpDatabase(src, bucket, { now: NOW, markComplete: false });
+  const dumped = await dumpDatabase(src, bucket, { now: NOW });
   const key = tableKey(dumped, "comments");
-  const file = JSON.parse(await readText(bucket, key));
-  for (const row of file.rows) delete row.text;
-  await bucket.put(key, JSON.stringify(file));
-  await writeCompleteMarker(bucket, dumped);
+  await rewriteTable(bucket, dumped, key, (file) => {
+    for (const row of file.rows) delete row.text;
+  });
   await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(
     /comments row 0 does not match the schema's columns \(lacks: text;/,
   );
@@ -187,9 +186,9 @@ test("a column missing from every row of a table is refused, naming it", async (
 test("a column the schema does not have is refused too, and an FTS5 table that carries a rowid is not", async () => {
   const dumped = await dumpDatabase(src, bucket, { now: NOW });
   const key = tableKey(dumped, "settings");
-  const file = JSON.parse(await readText(bucket, key));
-  for (const row of file.rows) row.extra = 1;
-  await bucket.put(key, JSON.stringify(file));
+  await rewriteTable(bucket, dumped, key, (file) => {
+    for (const row of file.rows) row.extra = 1;
+  });
   await expect(restoreDump(dst, bucket, dumped.prefix)).rejects.toThrow(
     /settings row 0 .*not in the schema: extra/,
   );
