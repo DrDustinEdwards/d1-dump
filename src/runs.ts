@@ -1,7 +1,7 @@
 import {
   COMPLETE_MARKER,
   DEFAULT_PREFIX,
-  LATEST_POINTER,
+  latestPointerKey,
   type CompleteMarker,
   type LatestPointer,
 } from "./dump.js";
@@ -62,7 +62,7 @@ async function runIdsOf(bucket: R2Like, prefix: string): Promise<string[] | null
 // caller to the listing: a bucket whose runs predate the pointer, a pointer pruned or written by
 // hand, or one that is not JSON.
 async function pointedDump(bucket: R2Like, prefix: string): Promise<LatestDump | null> {
-  const obj = await bucket.get(`${prefix}${LATEST_POINTER}`);
+  const obj = await bucket.get(latestPointerKey(prefix));
   if (!obj) return null;
   let id: unknown;
   try {
