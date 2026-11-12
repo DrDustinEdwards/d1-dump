@@ -116,26 +116,46 @@ export async function backupHealth(
   bucket: R2Like,
   options: { prefix?: string; now?: Date; staleHours?: number } = {},
 ): Promise<BackupHealth> {
-  const staleHours = options.staleHours ?? DEFAULT_STALE_HOURS;
-  let latest: LatestDump | null;
+  return stampHealth(
+    async () => (await latestDump(bucket, { prefix: options.prefix }))?.exported_at ?? null,
+    {
+      ...options,
+      what: "dump",
+      unreadable: "backup freshness unreadable",
+      none: "no complete dump found",
+    },
+  );
+}
+
+// The BackupHealth of a stamp `read` fetches: a failed read or no stamp is a warning, never an exception.
+export async function stampHealth(
+  read: () => Promise<string | null>,
+  options: { what: string; unreadable: string; none: string; now?: Date; staleHours?: number },
+): Promise<BackupHealth> {
+  let stamp: string | null;
   try {
-    latest = await latestDump(bucket, { prefix: options.prefix });
+    stamp = await read();
   } catch (err) {
     return {
       last_ok: null,
       age_hours: null,
-      warning: `backup freshness unreadable: ${(err instanceof Error ? err.message : String(err)).slice(0, 80)}`,
+      warning: `${options.unreadable}: ${(err instanceof Error ? err.message : String(err)).slice(0, 80)}`,
     };
   }
-  if (!latest) return { last_ok: null, age_hours: null, warning: "no complete dump found" };
-  return ageOf(latest.exported_at, options.now ?? new Date(), staleHours, "dump");
+  if (stamp === null) return { last_ok: null, age_hours: null, warning: options.none };
+  return ageOf(
+    stamp,
+    options.now ?? new Date(),
+    options.staleHours ?? DEFAULT_STALE_HOURS,
+    options.what,
+  );
 }
 
 // A stamp this far ahead of the reader is a wrong clock; less is ordinary skew between a Worker and its reader.
 const CLOCK_SKEW_MS = 5 * 60_000;
 
 // The BackupHealth of a stamped time: its age, and a warning past staleHours or when it is not a time.
-export function ageOf(stamp: string, now: Date, staleHours: number, what: string): BackupHealth {
+function ageOf(stamp: string, now: Date, staleHours: number, what: string): BackupHealth {
   const stamped = Date.parse(stamp);
   if (Number.isNaN(stamped))
     return {

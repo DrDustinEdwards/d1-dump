@@ -1,5 +1,5 @@
 import { JSON_TYPE } from "./r2.js";
-import { DAY_MS, DEFAULT_STALE_HOURS, ageOf, isLockRefusal, type BackupHealth } from "./runs.js";
+import { DAY_MS, stampHealth, isLockRefusal, type BackupHealth } from "./runs.js";
 import type { R2FilesLike, R2ObjectLike } from "./types.js";
 
 export const FILES_PREFIX = "files/";
@@ -270,25 +270,18 @@ export async function filesHealth(
   backup: R2FilesLike,
   options: { name: string; now?: Date; staleHours?: number },
 ): Promise<BackupHealth> {
-  const staleHours = options.staleHours ?? DEFAULT_STALE_HOURS;
-  let marker: FilesComplete | null;
-  try {
-    const obj = await backup.get(`${FILES_PREFIX}${options.name}/${FILES_COMPLETE}`);
-    marker = obj ? (JSON.parse(await obj.text()) as FilesComplete) : null;
-  } catch (err) {
-    return {
-      last_ok: null,
-      age_hours: null,
-      warning: `files backup freshness unreadable: ${(err instanceof Error ? err.message : String(err)).slice(0, 80)}`,
-    };
-  }
-  if (!marker)
-    return {
-      last_ok: null,
-      age_hours: null,
-      warning: `no complete files pass of ${options.name} found`,
-    };
-  return ageOf(marker.finished_at, options.now ?? new Date(), staleHours, "files pass");
+  return stampHealth(
+    async () => {
+      const obj = await backup.get(`${FILES_PREFIX}${options.name}/${FILES_COMPLETE}`);
+      return obj ? (JSON.parse(await obj.text()) as FilesComplete).finished_at : null;
+    },
+    {
+      ...options,
+      what: "files pass",
+      unreadable: "files backup freshness unreadable",
+      none: `no complete files pass of ${options.name} found`,
+    },
+  );
 }
 
 export interface RestoreFilesOptions {
