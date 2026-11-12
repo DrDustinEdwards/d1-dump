@@ -1,5 +1,5 @@
 import { JSON_TYPE } from "./r2.js";
-import { DAY_MS, healthOf, isLockRefusal, type BackupHealth } from "./runs.js";
+import { DAY_MS, stampHealth, isLockRefusal, type BackupHealth } from "./runs.js";
 import type { R2FilesLike, R2ObjectLike } from "./types.js";
 
 export const FILES_PREFIX = "files/";
@@ -270,7 +270,7 @@ export async function filesHealth(
   backup: R2FilesLike,
   options: { name: string; now?: Date; staleHours?: number },
 ): Promise<BackupHealth> {
-  return healthOf(
+  return stampHealth(
     async () => {
       const obj = await backup.get(`${FILES_PREFIX}${options.name}/${FILES_COMPLETE}`);
       return obj ? (JSON.parse(await obj.text()) as FilesComplete).finished_at : null;

@@ -116,7 +116,7 @@ export async function backupHealth(
   bucket: R2Like,
   options: { prefix?: string; now?: Date; staleHours?: number } = {},
 ): Promise<BackupHealth> {
-  return healthOf(
+  return stampHealth(
     async () => (await latestDump(bucket, { prefix: options.prefix }))?.exported_at ?? null,
     {
       ...options,
@@ -128,7 +128,7 @@ export async function backupHealth(
 }
 
 // The BackupHealth of a stamp `read` fetches: a failed read or no stamp is a warning, never an exception.
-export async function healthOf(
+export async function stampHealth(
   read: () => Promise<string | null>,
   options: { what: string; unreadable: string; none: string; now?: Date; staleHours?: number },
 ): Promise<BackupHealth> {
