@@ -1,5 +1,5 @@
 import { JSON_TYPE } from "./r2.js";
-import { DEFAULT_STALE_HOURS, ageOf, isLockRefusal, type BackupHealth } from "./runs.js";
+import { DAY_MS, DEFAULT_STALE_HOURS, ageOf, isLockRefusal, type BackupHealth } from "./runs.js";
 import type { R2FilesLike, R2ObjectLike } from "./types.js";
 
 export const FILES_PREFIX = "files/";
@@ -11,8 +11,6 @@ export const SOURCE_ETAG = "d1-dump-source-etag";
 export const DEFAULT_KEEP_DELETED_DAYS = 30;
 export const DEFAULT_MAX_OBJECTS = 1000;
 export const DEFAULT_TIME_BUDGET_MS = 300_000;
-
-const DAY_MS = 86_400_000;
 
 export interface FilesOptions {
   // The source's name in the backup: its copies go under files/<name>/.

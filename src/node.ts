@@ -11,6 +11,7 @@ import { cloudflareBucket, cloudflareScratch, type RestBucket } from "./cloudfla
 import { COMPLETE_MARKER, DEFAULT_PREFIX, type CompleteMarker } from "./dump.js";
 import { SCRATCH_PREFIX, runRestoreDrill, type Scratch } from "./drill.js";
 import { FILES_COMPLETE, FILES_PREFIX, FILES_PROGRESS, restoreFiles } from "./files.js";
+import { listAllKeys } from "./r2.js";
 import { latestDump } from "./runs.js";
 import type { D1Like, D1Statement, R2FilesLike, R2Like, R2ObjectLike } from "./types.js";
 
@@ -25,21 +26,23 @@ export function pathInside(root: string, key: string): string {
   return path;
 }
 
+// Every file under dir as a "/"-joined key relative to root; a missing directory yields none.
+async function walkKeys(root: string, dir: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...(await walkKeys(root, path)));
+    else out.push(relative(root, path).split(sep).join("/"));
+  }
+  return out;
+}
+
 // A downloaded dump as an R2Like, read only, for a drill run from Node. `root` holds the
 // keys as paths: <root>/backups/json/<run id>/<table>.json. Not exported from the package
 // entry, which has to stay free of node: imports so a Worker can bundle it.
 export function directoryBucket(root: string): R2Like {
   const readOnly = async (): Promise<never> => {
     throw new Error("d1-dump: a directory bucket is read only");
-  };
-  const keysUnder = async (dir: string): Promise<string[]> => {
-    const out: string[] = [];
-    for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) out.push(...(await keysUnder(path)));
-      else out.push(relative(root, path).split(sep).join("/"));
-    }
-    return out;
   };
   return {
     get: async (key) => {
@@ -56,7 +59,7 @@ export function directoryBucket(root: string): R2Like {
       return { text: async () => bytes.toString("utf8"), arrayBuffer: async () => copy };
     },
     list: async ({ prefix = "" }) => ({
-      objects: (await keysUnder(root))
+      objects: (await walkKeys(root, root))
         .filter((k) => k.startsWith(prefix))
         .sort()
         .map((key) => ({ key })),
@@ -269,30 +272,9 @@ async function digest(path: string): Promise<{ sha256: string; md5: string; byte
   return { sha256: sha.digest("hex"), md5: md5.digest("hex"), bytes };
 }
 
-// Every key under a prefix, over the REST list, page by page.
-async function keysOf(bucket: RestBucket, prefix: string): Promise<string[]> {
-  const keys: string[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await bucket.list({ prefix, cursor });
-    keys.push(...page.objects.map((o) => o.key));
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
-  return keys;
-}
-
 // A directory as an R2FilesLike: list and get read the files under root, put writes one. Its
 // objects carry no metadata, which the drill does not check.
 function directoryFiles(root: string): R2FilesLike {
-  const all = async (dir: string): Promise<string[]> => {
-    const out: string[] = [];
-    for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) out.push(...(await all(path)));
-      else out.push(relative(root, path).split(sep).join("/"));
-    }
-    return out;
-  };
   const object = (key: string): R2ObjectLike => ({
     key,
     etag: "",
@@ -302,7 +284,7 @@ function directoryFiles(root: string): R2FilesLike {
   });
   return {
     list: async ({ prefix = "", startAfter }) => ({
-      objects: (await all(root))
+      objects: (await walkKeys(root, root))
         .filter((k) => k.startsWith(prefix) && (startAfter === undefined || k > startAfter))
         .sort()
         .map(object),
@@ -360,7 +342,7 @@ export async function drillFilesFromBucket(
   let failed = false;
   try {
     const bucket = cloudflareBucket(accountId, apiToken, options.bucket, options.fetchImpl);
-    const all = await keysOf(bucket, FILES_PREFIX);
+    const all = await listAllKeys(bucket, FILES_PREFIX);
     const found = [
       ...new Set(all.map((k) => k.slice(FILES_PREFIX.length).split("/")[0]).filter(Boolean)),
     ].sort();
