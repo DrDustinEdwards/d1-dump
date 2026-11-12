@@ -187,7 +187,7 @@ export interface RetentionPolicy {
 }
 export const DEFAULT_RETENTION: RetentionPolicy = { daily: 14, weekly: 8, monthly: 6 };
 
-const DAY_MS = 86_400_000;
+export const DAY_MS = 86_400_000;
 const dayOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 // The Monday of the ISO week a UTC day falls in, as a day string. Keyed this way the
 // year boundary needs no week-number arithmetic.
