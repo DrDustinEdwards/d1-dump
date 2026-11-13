@@ -29,7 +29,13 @@ export function pathInside(root: string, key: string): string {
 // Every file under dir as a "/"-joined key relative to root; a missing directory yields none.
 async function walkKeys(root: string, dir: string): Promise<string[]> {
   const out: string[] = [];
-  for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(
+    (err: NodeJS.ErrnoException) => {
+      if (err.code === "ENOENT") return [];
+      throw err;
+    },
+  );
+  for (const entry of entries) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) out.push(...(await walkKeys(root, path)));
     else out.push(relative(root, path).split(sep).join("/"));
