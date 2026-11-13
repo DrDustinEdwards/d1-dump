@@ -22,11 +22,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The merge commit and its base-branch parent, which the changeset step diffs.
+          fetch-depth: 2
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      # Merging and releasing are two steps (.changeset/README.md): a pull request adds a changeset and leaves the version
+      # alone; the release pull request sets the version and uses up every changeset. Renovate's bumps release nothing.
+      - name: A changeset, or the release itself
+        if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'renovate/')
+        run: |
+          was=$(git show HEAD^1:package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')
+          now=$(node -p 'require("./package.json").version')
+          if [ "$was" = "$now" ]; then
+            npx changeset status --since=HEAD^1
+          else
+            left=$(find .changeset -name '*.md' ! -name README.md)
+            [ -z "$left" ] || { echo "::error::The version moved from $was to $now, but changesets are left: $left. A release is \`npx changeset version\` on main, alone."; exit 1; }
+          fi
       - run: npm run typecheck
       - name: Lint
         run: npm run lint

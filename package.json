@@ -25,10 +25,12 @@
     "bloat": "devkit-no-bloat",
     "lint": "oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error",
     "format": "oxfmt",
-    "format:check": "oxfmt --check"
+    "format:check": "oxfmt --check",
+    "changeset": "changeset"
   },
   "devDependencies": {
-    "@dustinedwards/devkit": "github:DrDustinEdwards/devkit#v0.45.1",
+    "@changesets/cli": "3.0.3",
+    "@dustinedwards/devkit": "github:DrDustinEdwards/devkit#v0.48.0",
     "@types/node": "26.6.6",
     "@vitest/coverage-v8": "5.1.0",
     "miniflare": "4.20260730.0",
