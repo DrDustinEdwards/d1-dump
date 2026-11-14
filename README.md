@@ -1,6 +1,6 @@
 # d1-dump
 
-A per-table D1 dump into a site's own R2 bucket, with a restore and a backup-age reading for health. It works where `wrangler d1 export` does not: D1 refuses to export any database that holds an FTS5 table (`D1 Export error: cannot export databases with Virtual Tables (fts5)`).
+A per-table D1 dump into a site's own R2 bucket, with a restore and a backup-age reading for health. It exists because `wrangler d1 export` cannot give a restore for a database that holds an FTS5 table: it refuses (`D1 Export error: cannot export databases with Virtual Tables (fts5)`) unless you pass `--compatibility sqlite3_cli_only` (Cloudflare changelog, 2026-11-12), and that dump targets the SQLite CLI only and cannot be imported back into D1.
 
 Each site installs it. D1 Time Travel already restores any minute of the last 30 days in place. This covers what Time Travel does not: a restore into a copy you can inspect first, history past 30 days, and a copy you can take outside the account.
 
