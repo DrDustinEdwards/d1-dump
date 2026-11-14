@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@changesets/cli": "3.0.3",
-    "@dustinedwards/devkit": "github:DrDustinEdwards/devkit#v0.50.1",
+    "@dustinedwards/devkit": "github:DrDustinEdwards/devkit#v0.51.0",
     "@types/node": "26.6.6",
     "@vitest/coverage-v8": "5.1.0",
     "miniflare": "4.20260730.0",
