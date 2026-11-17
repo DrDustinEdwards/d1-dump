@@ -45,5 +45,11 @@
   },
   "allowScripts": {
     "workerd": false
+  },
+  "overrides": {
+    "miniflare": {
+      "undici": "7.30.1",
+      "sharp": "0.35.5"
+    }
   }
 }
