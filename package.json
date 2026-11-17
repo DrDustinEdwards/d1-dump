@@ -40,16 +40,16 @@
     "typescript": "7.0.2",
     "vitest": "5.1.0"
   },
-  "engines": {
-    "node": ">=24.14.1"
-  },
-  "allowScripts": {
-    "workerd": false
-  },
   "overrides": {
     "miniflare": {
       "undici": "7.30.1",
       "sharp": "0.35.5"
     }
+  },
+  "engines": {
+    "node": ">=24.14.1"
+  },
+  "allowScripts": {
+    "workerd": false
   }
 }
