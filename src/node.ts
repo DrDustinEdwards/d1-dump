@@ -371,6 +371,16 @@ export async function drillFilesFromBucket(
         )
         .sort();
       if (!copies.length) {
+        // A source bucket that is truly empty leaves only the markers. A complete pass that counted
+        // no objects is a backup of nothing, which restores trivially; anything else is a missing backup.
+        const done = await bucket.get(`${base}${FILES_COMPLETE}`);
+        const counted = done ? (JSON.parse(await done.text()) as { objects?: number }) : null;
+        if (counted?.objects === 0) {
+          lines.push(
+            `  ok   ${name}: the last complete pass found no files in the source, so there is nothing to restore`,
+          );
+          continue;
+        }
         failed = true;
         lines.push(`  FAIL ${name}: no copies under ${base}`);
         continue;

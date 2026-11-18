@@ -502,6 +502,27 @@ test("drill-files restores a sample of each files backup into scratch and checks
   expect(passed.lines.join("\n")).toMatch(/files drill PASSED: media/);
   expect(passed.code).toBe(0);
   expect(passed.lines.filter((l) => /bytes match and the etag/.test(l))).toHaveLength(3);
+  // A source that held no files leaves only its markers: a complete pass of nothing passes, an unfinished one does not.
+  await bucket.put("files/empty/_complete.json", JSON.stringify({ objects: 0, copied: 0 }));
+  await bucket.put("files/unfinished/_progress.json", "{}");
+  const empty = await drillFilesFromBucket({
+    accountId: "acct",
+    apiToken: "tok",
+    bucket: "site-backups",
+    names: ["empty"],
+    fetchImpl: rest(),
+  });
+  expect(empty.code).toBe(0);
+  expect(empty.lines.join("\n")).toMatch(/ok\s+empty: the last complete pass found no files/);
+  const none = await drillFilesFromBucket({
+    accountId: "acct",
+    apiToken: "tok",
+    bucket: "site-backups",
+    names: ["unfinished"],
+    fetchImpl: rest(),
+  });
+  expect(none.code).toBe(1);
+  expect(none.lines.join("\n")).toMatch(/FAIL unfinished: no copies/);
   const lied = await drillFilesFromBucket({
     accountId: "acct",
     apiToken: "tok",
