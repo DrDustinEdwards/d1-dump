@@ -1,4 +1,4 @@
-import { JSON_TYPE } from "./r2.js";
+import { JSON_TYPE, putSmall } from "./r2.js";
 import { DAY_MS, stampHealth, isLockRefusal, type BackupHealth } from "./runs.js";
 import type { R2FilesLike, R2ObjectLike } from "./types.js";
 
@@ -195,7 +195,7 @@ export async function backupFiles(
 
   while (!s.done || !b.done) {
     if (worked >= maxObjects || Date.now() >= deadline) {
-      await backup.put(progressKey, JSON.stringify(progress), JSON_TYPE);
+      await putSmall(backup, progressKey, JSON.stringify(progress), JSON_TYPE);
       return { name, complete: false, worked, counts, reserved };
     }
     const copyKey = b.done ? null : b.value.key.slice(base.length);
@@ -252,7 +252,7 @@ export async function backupFiles(
       finished_at: now.toISOString(),
       ...counts,
     };
-    await backup.put(completeKey, JSON.stringify(finished), JSON_TYPE);
+    await putSmall(backup, completeKey, JSON.stringify(finished), JSON_TYPE);
   }
   const next: Progress = {
     started_at: null,
@@ -261,7 +261,7 @@ export async function backupFiles(
     missing: progress.seen_missing,
     seen_missing: {},
   };
-  await backup.put(progressKey, JSON.stringify(next), JSON_TYPE);
+  await putSmall(backup, progressKey, JSON.stringify(next), JSON_TYPE);
   return { name, complete, worked, counts, reserved };
 }
 

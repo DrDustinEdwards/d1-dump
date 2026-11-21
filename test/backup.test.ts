@@ -331,3 +331,26 @@ test("createSiteBackup dumps, copies each bucket and reports one status", async 
   expect(after.warning).toBeUndefined();
   await expect(site.runFilesBackup(env, ["nope"])).rejects.toThrow("no files backup named nope");
 });
+
+test("a pointer write R2 refuses for its write rate is tried again, so the run still completes", async () => {
+  let refused = 0;
+  const limited: R2Like = {
+    put: async (key, value, options) => {
+      if (key.endsWith("latest.json") && refused < 2) {
+        refused++;
+        throw new Error("put: Reduce your concurrent request rate for the same object. (10058)");
+      }
+      return bucket.put(key, value, options);
+    },
+    get: (key) => bucket.get(key),
+    list: (options) => bucket.list(options),
+    delete: (keys) => bucket.delete(keys),
+  } as R2Like;
+  const { dump } = await runCheckedBackup(src, limited, {
+    now: NOW,
+    exclude: ["settings"],
+    required: ["posts", "comments"],
+  });
+  expect(refused).toBe(2);
+  expect((await latestDump(bucket))?.run_id).toBe(dump.run_id);
+});

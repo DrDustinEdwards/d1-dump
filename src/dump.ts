@@ -1,5 +1,5 @@
 import { GZIP_TYPE, gzipText } from "./gzip.js";
-import { JSON_TYPE, putChecked, putJsonStreamed } from "./r2.js";
+import { JSON_TYPE, putChecked, putJsonStreamed, putSmall } from "./r2.js";
 import { quoteIdent, readPlan, type FtsTable, type SchemaEntry } from "./schema.js";
 import type { D1Like, R2Like } from "./types.js";
 
@@ -267,7 +267,7 @@ export async function writeCompleteMarker(bucket: R2Like, result: DumpResult): P
     excluded: result.excluded,
     checksums: result.checksums,
   };
-  await bucket.put(key, JSON.stringify(marker), JSON_TYPE);
+  await putSmall(bucket, key, JSON.stringify(marker), JSON_TYPE);
   result.keys.push(key);
   result.complete = true;
   await advancePointer(bucket, result);
@@ -285,7 +285,7 @@ async function advancePointer(bucket: R2Like, result: DumpResult): Promise<void>
     if (typeof named === "string" && named > result.run_id) return;
   }
   const pointer: LatestPointer = { run_id: result.run_id, exported_at: result.exported_at };
-  await bucket.put(key, JSON.stringify(pointer), JSON_TYPE);
+  await putSmall(bucket, key, JSON.stringify(pointer), JSON_TYPE);
 }
 
 function sidecarsOf(options: DumpOptions): Record<string, unknown> {
