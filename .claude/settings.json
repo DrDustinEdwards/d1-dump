@@ -51,10 +51,6 @@
       "Bash(npx wrangler d1 execute *DELETE*)",
       "Bash(npx wrangler d1 execute *DROP*)"
     ],
-    "deny": [
-      "Bash(rm -rf *)",
-      "Read(**/.env*)",
-      "Read(**/.dev.vars)"
-    ]
+    "deny": ["Bash(rm -rf *)", "Read(**/.env*)", "Read(**/.dev.vars)"]
   }
 }
