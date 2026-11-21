@@ -9,6 +9,40 @@ const R2_DELETE_MAX = 1000;
 
 export const JSON_TYPE = { httpMetadata: { contentType: "application/json" } };
 
+// R2 refuses a write to an object written again too fast with error 10058, "Reduce your concurrent request rate
+// for the same object" (developers.cloudflare.com/r2/api/error-codes/), about one write a second per key. Two
+// overlapping runs write the same pointer and progress objects, so a refused write is tried again after a pause.
+const R2_RATE_LIMITED = 10058;
+const RATE_RETRIES = 4;
+const RATE_PAUSE_MS = 500;
+
+function isRateRefusal(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  if ((err as { code?: unknown }).code === R2_RATE_LIMITED) return true;
+  const message = (err as { message?: unknown }).message;
+  return (
+    typeof message === "string" && /\(10058\)|Reduce your concurrent request rate/.test(message)
+  );
+}
+
+/** Writes a small object, again after a pause (doubling each time) while R2 refuses it for its write rate. */
+export async function putSmall<O>(
+  bucket: { put(key: string, value: string | Uint8Array, options?: O): Promise<unknown> },
+  key: string,
+  value: string | Uint8Array,
+  options?: O,
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await bucket.put(key, value, options);
+      return;
+    } catch (err) {
+      if (attempt >= RATE_RETRIES || !isRateRefusal(err)) throw err;
+      await new Promise((resolve) => setTimeout(resolve, RATE_PAUSE_MS * 2 ** attempt));
+    }
+  }
+}
+
 /**
  * Writes one object and returns its checksum. An object of one chunk is also sent with its SHA-256, which R2
  * checks against what it received (developers.cloudflare.com/r2/api/workers/workers-api-reference/, put options).
@@ -22,7 +56,7 @@ export async function putChecked(
   const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
   const checksum = await checksumOf(bytes);
   const whole = checksum.startsWith("sha256:") ? checksum.slice("sha256:".length) : undefined;
-  await bucket.put(key, bytes, { ...options, ...(whole ? { sha256: whole } : {}) });
+  await putSmall(bucket, key, bytes, { ...options, ...(whole ? { sha256: whole } : {}) });
   return checksum;
 }
 
