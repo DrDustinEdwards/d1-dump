@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "env": {
+    "GIT_AUTHOR_NAME": "Dustin Edwards",
+    "GIT_AUTHOR_EMAIL": "204601333+DrDustinEdwards@users.noreply.github.com",
+    "GIT_COMMITTER_NAME": "Dustin Edwards",
+    "GIT_COMMITTER_EMAIL": "204601333+DrDustinEdwards@users.noreply.github.com"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "h=\"$CLAUDE_PROJECT_DIR/node_modules/@dustinedwards/devkit/claude/hooks/no-em-dash.sh\"; [ -f \"$h\" ] && exec bash \"$h\"; grep -Eq '\"command\" *: *\"npm (ci|install)( --?[a-z-]+)*\"' && exit 0; echo \"devkit is not installed, so the shared Claude Code hooks cannot run and this call is BLOCKED: run npm ci first.\" >&2; exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "h=\"$CLAUDE_PROJECT_DIR/node_modules/@dustinedwards/devkit/claude/hooks/scoped-git-add.sh\"; [ -f \"$h\" ] && exec bash \"$h\"; grep -Eq '\"command\" *: *\"npm (ci|install)( --?[a-z-]+)*\"' && exit 0; echo \"devkit is not installed, so the shared Claude Code hooks cannot run and this call is BLOCKED: run npm ci first.\" >&2; exit 2"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npm test*)",
+      "Bash(npx tsc *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git show *)",
+      "Bash(git log *)",
+      "Bash(git branch*)"
+    ],
+    "ask": [
+      "Bash(npm run deploy*)",
+      "Bash(npx wrangler deploy*)",
+      "Bash(npx wrangler secret*)",
+      "Bash(npx wrangler d1 migrations apply*)",
+      "Bash(npx wrangler d1 execute *DELETE*)",
+      "Bash(npx wrangler d1 execute *DROP*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Read(**/.env*)",
+      "Read(**/.dev.vars)"
+    ]
+  }
+}
