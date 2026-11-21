@@ -25,7 +25,7 @@ permissions: {}
 
 jobs:
   bump:
-    uses: DrDustinEdwards/devkit/.github/workflows/bump-consumers.yml@d44675809ea4be692d8c24225337386e257956b2 # v0.55.1
+    uses: DrDustinEdwards/devkit/.github/workflows/bump-consumers.yml@f3a862d8c31a2a32291bcc3c42aac7359a5ff62d # v0.55.10
     with:
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     secrets:
