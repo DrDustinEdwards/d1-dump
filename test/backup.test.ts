@@ -33,12 +33,26 @@ async function hasMarker(runId: string): Promise<boolean> {
   return (await bucket.get(`backups/json/${runId}/${COMPLETE_MARKER}`)) !== null;
 }
 
-test("a dump that passes every check is marked complete and pruned", async () => {
-  const { dump, pruned } = await runCheckedBackup(src, bucket, {
+test("a dump that passes every check is marked complete and pruned, though R2 refuses the pointer write twice for its rate", async () => {
+  let refused = 0;
+  const limited = {
+    put: async (key: string, value: string | Uint8Array, options?: object) => {
+      if (key.endsWith("_latest.json") && refused < 2) {
+        refused++;
+        throw new Error("put: Reduce your concurrent request rate for the same object. (10058)");
+      }
+      return bucket.put(key, value, options);
+    },
+    get: (key: string) => bucket.get(key),
+    list: (options: Parameters<R2Like["list"]>[0]) => bucket.list(options),
+    delete: (keys: string | string[]) => bucket.delete(keys),
+  } as R2Like;
+  const { dump, pruned } = await runCheckedBackup(src, limited, {
     now: NOW,
     exclude: ["settings"],
     required: ["posts", "comments"],
   });
+  expect(refused).toBe(2);
   expect(await hasMarker(dump.run_id)).toBe(true);
   expect((await latestDump(bucket))?.run_id).toBe(dump.run_id);
   expect(pruned).toEqual({ kept: 1, pruned: 0, locked: 0 });
@@ -330,27 +344,4 @@ test("createSiteBackup dumps, copies each bucket and reports one status", async 
   });
   expect(after.warning).toBeUndefined();
   await expect(site.runFilesBackup(env, ["nope"])).rejects.toThrow("no files backup named nope");
-});
-
-test("a pointer write R2 refuses for its write rate is tried again, so the run still completes", async () => {
-  let refused = 0;
-  const limited: R2Like = {
-    put: async (key, value, options) => {
-      if (key.endsWith("latest.json") && refused < 2) {
-        refused++;
-        throw new Error("put: Reduce your concurrent request rate for the same object. (10058)");
-      }
-      return bucket.put(key, value, options);
-    },
-    get: (key) => bucket.get(key),
-    list: (options) => bucket.list(options),
-    delete: (keys) => bucket.delete(keys),
-  } as R2Like;
-  const { dump } = await runCheckedBackup(src, limited, {
-    now: NOW,
-    exclude: ["settings"],
-    required: ["posts", "comments"],
-  });
-  expect(refused).toBe(2);
-  expect((await latestDump(bucket))?.run_id).toBe(dump.run_id);
 });
