@@ -43,6 +43,7 @@ export {
   type RetentionPolicy,
 } from "./runs.js";
 export { readDumpJson } from "./gzip.js";
+export { listAllKeys } from "./r2.js";
 export { readPlan, type FtsMode, type FtsTable, type Plan, type SchemaEntry } from "./schema.js";
 export type {
   D1Like,
