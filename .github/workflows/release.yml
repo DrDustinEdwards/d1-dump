@@ -22,11 +22,11 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    uses: DrDustinEdwards/devkit/.github/workflows/release.yml@8e068797d27c806e647136a665d4b4041c6bd915 # v0.56.0
+    uses: DrDustinEdwards/devkit/.github/workflows/release.yml@56ee28ee00f613b77643071d4187d998bad5e55e # v0.58.0
 
   bump:
     needs: release
     if: needs.release.outputs.created == 'true'
-    uses: DrDustinEdwards/devkit/.github/workflows/bump-consumers.yml@8e068797d27c806e647136a665d4b4041c6bd915 # v0.56.0
+    uses: DrDustinEdwards/devkit/.github/workflows/bump-consumers.yml@56ee28ee00f613b77643071d4187d998bad5e55e # v0.58.0
     secrets:
       token: ${{ secrets.RENOVATE_TRIGGER_TOKEN }}
