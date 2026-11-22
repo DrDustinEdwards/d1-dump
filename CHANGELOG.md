@@ -1,5 +1,11 @@
 # @dustinedwards/d1-dump
 
+## 0.17.0
+
+### Minor Changes
+
+- Export `listAllKeys`, so a site lists every key under a prefix without copying it.
+
 ## 0.16.3
 
 ### Patch Changes
