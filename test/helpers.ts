@@ -35,7 +35,7 @@ export async function rows(db: D1Like, sql: string): Promise<Array<Record<string
 // content FTS5 index kept in step by triggers, an internal-content FTS5 table, a
 // contentless one, a WITHOUT ROWID table, a BLOB column, an index and a view.
 export const SITE_SCHEMA = [
-  "CREATE TABLE posts (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, body TEXT, cover BLOB)",
+  "CREATE TABLE posts (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL UNIQUE, body TEXT, cover BLOB, body_len INTEGER GENERATED ALWAYS AS (length(body)) VIRTUAL)",
   "CREATE TABLE comments (id INTEGER PRIMARY KEY, post_id INTEGER NOT NULL REFERENCES posts(id), text TEXT)",
   "CREATE VIRTUAL TABLE posts_fts USING fts5(body, content='posts', content_rowid='id')",
   "CREATE TRIGGER posts_ai AFTER INSERT ON posts BEGIN INSERT INTO posts_fts(rowid, body) VALUES (new.id, new.body); END",
