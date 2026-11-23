@@ -1,5 +1,11 @@
 # @dustinedwards/d1-dump
 
+## 0.17.1
+
+### Patch Changes
+
+- Restore tables with generated columns: the dump holds them, the restore leaves them to SQLite.
+
 ## 0.17.0
 
 ### Minor Changes
