@@ -38,16 +38,24 @@ function boundSize(v: unknown): number {
 
 const missing = (k: string) => `d1-dump: ${k} is missing from the dump`;
 
-// The columns the restored table has, from the CREATE statement in _schema.json that was
-// just run. An internal FTS5 table is dumped with its rowid too.
-async function schemaColumns(db: D1Like, table: string, internalFts: boolean): Promise<string[]> {
+// The columns the dump holds for a restored table, from the CREATE statement in _schema.json
+// that was just run, and the ones an INSERT may name (a generated column is dumped by
+// SELECT * but computed by SQLite on insert). An internal FTS5 table is dumped with its rowid too.
+async function schemaColumns(
+  db: D1Like,
+  table: string,
+  internalFts: boolean,
+): Promise<{ dumped: string[]; insertable: string[] }> {
   const { results } = await db
-    .prepare(`PRAGMA table_info(${quoteIdent(table)})`)
-    .all<{ name: string }>();
-  const columns = results.map((c) => c.name);
-  if (columns.length === 0)
+    .prepare(`PRAGMA table_xinfo(${quoteIdent(table)})`)
+    .all<{ name: string; hidden: number }>();
+  // hidden: 0 plain, 1 virtual-table internals, 2 and 3 generated (virtual, stored).
+  const plain = results.filter((c) => c.hidden === 0).map((c) => c.name);
+  const generated = results.filter((c) => c.hidden >= 2).map((c) => c.name);
+  if (plain.length === 0)
     throw new Error(`d1-dump: ${table} has no columns after its CREATE statement ran`);
-  return internalFts ? ["rowid", ...columns] : columns;
+  const insertable = internalFts ? ["rowid", ...plain] : plain;
+  return { dumped: [...insertable, ...generated], insertable };
 }
 
 // Every row must carry exactly the schema's columns. Comparing to the first row instead
@@ -115,8 +123,12 @@ export async function restoreDump(
         `d1-dump: ${table.key} holds ${rows.length} rows, the marker says ${table.rows}`,
       );
     if (rows.length > 0) {
-      const columns = await schemaColumns(db, table.name, internalFts.has(table.name));
-      checkColumns(table.name, columns, rows);
+      const { dumped, insertable: columns } = await schemaColumns(
+        db,
+        table.name,
+        internalFts.has(table.name),
+      );
+      checkColumns(table.name, dumped, rows);
       if (columns.length > D1_MAX_PARAMS)
         throw new Error(
           `d1-dump: ${table.name} has ${columns.length} columns, over D1's ${D1_MAX_PARAMS} bound parameters`,

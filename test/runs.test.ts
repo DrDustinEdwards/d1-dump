@@ -107,6 +107,24 @@ test("backup health reports the newest complete dump in Capsid's /health shape, 
   expect((await bucket.list({ prefix: P, delimiter: "/" })).objects).toEqual([]);
 });
 
+test("a pointer that is not JSON is repaired by the next marker write", async () => {
+  await bucket.put(latestPointerKey(P), "{not json");
+  const run_id = runIdFor(new Date("2026-09-28T09:00:00.000Z"));
+  await writeCompleteMarker(bucket, {
+    run_id,
+    prefix: `${P}${run_id}/`,
+    exported_at: "2026-09-28T09:00:00.000Z",
+    keys: [],
+    tables: [],
+    fts: [],
+    excluded: [],
+    checksums: {},
+    shadow_skipped: [],
+    complete: false,
+  });
+  expect(JSON.parse(await (await bucket.get(latestPointerKey(P)))!.text()).run_id).toBe(run_id);
+});
+
 test("backup health with no complete dump is a warning, not a missing field", async () => {
   expect(await backupHealth(bucket)).toEqual({
     last_ok: null,

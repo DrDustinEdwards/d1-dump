@@ -281,7 +281,11 @@ async function advancePointer(bucket: R2Like, result: DumpResult): Promise<void>
   const key = latestPointerKey(base);
   const current = await bucket.get(key);
   if (current) {
-    const named = (JSON.parse(await current.text()) as Partial<LatestPointer>).run_id;
+    // An unreadable pointer is overwritten, as pointedDump treats it as absent.
+    let named: unknown;
+    try {
+      named = (JSON.parse(await current.text()) as Partial<LatestPointer>).run_id;
+    } catch {}
     if (typeof named === "string" && named > result.run_id) return;
   }
   const pointer: LatestPointer = { run_id: result.run_id, exported_at: result.exported_at };
