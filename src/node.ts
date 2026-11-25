@@ -167,7 +167,7 @@ export function sqliteScratch(): (name: string) => Promise<Scratch> {
 // keys' paths, for a drill through directoryBucket(root). Its objects are the ones its marker
 // lists, then the marker. A listed object that is missing is left out, so the drill's own
 // checks fail on it. null when the bucket holds no complete run.
-export async function downloadLatestRun(
+async function downloadLatestRun(
   bucket: RestBucket,
   root: string,
   prefix: string = DEFAULT_PREFIX,

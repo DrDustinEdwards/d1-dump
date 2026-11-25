@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { CHUNK_BYTES, checksumOf } from "../src/checksum.js";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { expect, test } from "vitest";
 import {
   COMPLETE_MARKER,
   dumpDatabase,
@@ -11,29 +11,22 @@ import {
   type R2Like,
 } from "../src/index.js";
 import {
-  SITE_ROWS,
-  SITE_SCHEMA,
   exec,
+  NOW,
   readBytes,
   readText,
+  rewriteTable,
   rows,
   sandbox,
   tableKey,
-  rewriteTable,
+  useSeededSandbox,
 } from "./helpers.js";
 
 let src: D1Like;
 let dst: D1Like;
 let bucket: R2Like;
-let dispose: () => Promise<void>;
 
-beforeEach(async () => {
-  ({ src, dst, bucket, dispose } = await sandbox());
-  await exec(src, [...SITE_SCHEMA, ...SITE_ROWS]);
-});
-afterEach(async () => dispose());
-
-const NOW = new Date("2026-09-27T09:00:00.000Z");
+useSeededSandbox((box) => ({ src, dst, bucket } = box));
 
 test("every table is dumped, FTS5 shadow tables are not, and each FTS5 table is classified", async () => {
   const result = await dumpDatabase(src, bucket, { now: NOW });

@@ -18,7 +18,7 @@ export interface R2UploadedPartLike {
   etag: string;
 }
 
-export interface R2MultipartLike {
+interface R2MultipartLike {
   uploadPart(partNumber: number, value: Uint8Array): Promise<R2UploadedPartLike>;
   complete(parts: R2UploadedPartLike[]): Promise<unknown>;
   abort(): Promise<void>;

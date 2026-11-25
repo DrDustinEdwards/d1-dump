@@ -1,4 +1,5 @@
 import { Miniflare } from "miniflare";
+import { afterEach, beforeEach } from "vitest";
 import { checksumOf } from "../src/checksum.js";
 import type { D1Like, DrillResult, R2FilesLike, R2Like, StatementStats } from "../src/index.js";
 
@@ -21,6 +22,27 @@ export async function sandbox(): Promise<{
   const bucket = (await mf.getR2Bucket("BUCKET")) as unknown as R2Like;
   const media = (await mf.getR2Bucket("MEDIA")) as unknown as R2FilesLike;
   return { src, dst, bucket, media, dispose: () => mf.dispose() };
+}
+
+export const NOW = new Date("2026-09-27T09:00:00.000Z");
+export const LATER = new Date("2026-09-27T10:00:00.000Z");
+
+// A sandbox whose source database already holds the site's schema and rows.
+export async function seededSandbox(): Promise<Awaited<ReturnType<typeof sandbox>>> {
+  const box = await sandbox();
+  await exec(box.src, [...SITE_SCHEMA, ...SITE_ROWS]);
+  return box;
+}
+
+// A fresh seeded sandbox for each test, handed to `set` and disposed after it.
+export function useSeededSandbox(set: (box: Awaited<ReturnType<typeof sandbox>>) => void): void {
+  let dispose = async () => {};
+  beforeEach(async () => {
+    const box = await seededSandbox();
+    dispose = box.dispose;
+    set(box);
+  });
+  afterEach(() => dispose());
 }
 
 export async function exec(db: D1Like, statements: string[]): Promise<void> {
