@@ -145,15 +145,10 @@ test("sqlite: a batch is one transaction, so a failed statement leaves none of i
   await s.delete();
 });
 
-test("the backend is sqlite without credentials, d1 with them, and either can be asked for", () => {
-  expect(pickBackend(undefined, false)).toEqual({
-    backend: "sqlite",
-    why: "no Cloudflare credentials are set",
-  });
-  expect(pickBackend(undefined, true)).toEqual({
-    backend: "d1",
-    why: "Cloudflare credentials are set",
-  });
+test("the backend is sqlite even with credentials set, and d1 only when asked for", () => {
+  for (const credentials of [false, true])
+    expect(pickBackend(undefined, credentials)).toMatchObject({ backend: "sqlite" });
+  expect(pickBackend("d1", true)).toEqual({ backend: "d1", why: "asked for" });
   expect(pickBackend("sqlite", true)).toEqual({ backend: "sqlite", why: "asked for" });
   expect(pickBackend("d1", false)).toEqual({
     error: "--backend d1 needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment",

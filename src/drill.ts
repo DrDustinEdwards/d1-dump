@@ -267,7 +267,7 @@ async function verifyChecksums(
   check: (n: string, ok: boolean, detail: string) => void,
 ): Promise<void> {
   if (!marker.checksums) {
-    check("checksums", true, "this run predates checksums, so its objects were read unchecked");
+    check("checksums", false, "the marker has no checksums, so its objects cannot be verified");
     return;
   }
   const markerKey = `${prefix}${COMPLETE_MARKER}`;
@@ -373,8 +373,8 @@ async function verify(
         "search",
         results.length > 0,
         results.length > 0
-          ? `"${word}" found ${results.length} document(s) in ${f.name}.${col.name}`
-          : `"${word}" is in a restored ${source} row but ${f.name} does not find it`,
+          ? `a word from ${source} found ${results.length} document(s) in ${f.name}.${col.name}`
+          : `a word from a restored ${source} row is not found in ${f.name}.${col.name}`,
       );
       return;
     }

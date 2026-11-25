@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import {
   BackupIncomplete,
   COMPLETE_MARKER,
+  CREDENTIAL_COLUMN,
   backupFiles,
   createSiteBackup,
   filesHealth,
@@ -292,6 +293,33 @@ test("restoreFiles is a dry run by default, puts back what is missing, and overw
   expect(await (await media.get("img/c.txt"))?.text()).toBe("original");
 });
 
+test("the credential pattern names passphrase, one-time code and key columns, not footprint", () => {
+  for (const name of [
+    "passphrase",
+    "otp_hash",
+    "otp",
+    "access_key",
+    "encryptionKey",
+    "recovery_code",
+  ])
+    expect(CREDENTIAL_COLUMN.test(name), name).toBe(true);
+  for (const name of ["footprint", "session_id"])
+    expect(CREDENTIAL_COLUMN.test(name), name).toBe(false);
+});
+
+test("a run with a credential column is refused by default, and credentials: false turns the check off", async () => {
+  await exec(src, [
+    "CREATE TABLE codes (id INTEGER PRIMARY KEY, otp_hash TEXT)",
+    "INSERT INTO codes (otp_hash) VALUES ('x')",
+  ]);
+  await expect(runCheckedBackup(src, bucket, { now: NOW })).rejects.toBeInstanceOf(
+    BackupIncomplete,
+  );
+  expect((await bucket.list({ prefix: "backups/" })).objects).toEqual([]);
+  const off = await runCheckedBackup(src, bucket, { now: NOW, credentials: false });
+  expect(off.dump.complete).toBe(true);
+});
+
 test("excludeIfPresent excludes a table only while it exists, and credentials refuses a credential column unless allowed", async () => {
   await exec(src, [
     "CREATE TABLE preview_links (id INTEGER PRIMARY KEY, token_hash TEXT)",
@@ -311,6 +339,15 @@ test("excludeIfPresent excludes a table only while it exists, and credentials re
   expect(err.problems).toEqual([
     expect.stringMatching(/^preview_links has credential-looking column\(s\) token_hash/),
   ]);
+  // Refused before the write: the credential column never reached the bucket.
+  expect(err.dump.keys).toEqual([]);
+  expect(
+    (
+      await bucket.list({
+        prefix: `backups/json/${runIdFor(new Date("2026-10-21T03:17:00.000Z"))}`,
+      })
+    ).objects,
+  ).toEqual([]);
   const allowed = await runCheckedBackup(src, bucket, {
     now: new Date("2026-10-22T03:17:00.000Z"),
     credentials: { allow: { "preview_links.token_hash": "a sample reason" } },

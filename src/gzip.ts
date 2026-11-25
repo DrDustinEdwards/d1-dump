@@ -9,11 +9,28 @@ export async function gzipText(text: string): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+// A table file past this many decoded bytes cannot be restored in a Worker anyway (README, Size
+// limit), and a small object can expand without end, so decompression stops here.
+const MAX_GUNZIP_BYTES = 64 * 1024 * 1024;
+
 async function gunzipText(bytes: ArrayBuffer | Uint8Array): Promise<string> {
-  const stream = new Blob([bytes as BlobPart])
+  const reader = new Blob([bytes as BlobPart])
     .stream()
-    .pipeThrough(new DecompressionStream("gzip"));
-  return new Response(stream).text();
+    .pipeThrough(new DecompressionStream("gzip"))
+    .getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    size += value.byteLength;
+    if (size > MAX_GUNZIP_BYTES) {
+      await reader.cancel();
+      throw new Error(`d1-dump: a gzip object expands past ${MAX_GUNZIP_BYTES} bytes`);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
 }
 
 // Reads one object of a dump as JSON. A key ending in .gz holds gzip bytes, so a run written with

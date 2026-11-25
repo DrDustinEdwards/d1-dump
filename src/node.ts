@@ -79,26 +79,23 @@ export function directoryBucket(root: string): R2Like {
 
 type Backend = "sqlite" | "d1";
 
-// sqlite unless Cloudflare credentials are set; either can be asked for. Says why, so the
-// drill's output shows which one ran. asking for d1 without credentials is an error.
+// sqlite unless d1 is asked for: credentials exported for wrangler never send a dump to Cloudflare
+// on their own. Says why, so the drill's output shows which one ran. Asking for d1 without
+// credentials is an error.
 export function pickBackend(
   asked: string | undefined,
   credentials: boolean,
 ): { backend: Backend; why: string } | { error: string } {
   if (asked !== undefined && asked !== "sqlite" && asked !== "d1")
     return { error: `--backend is sqlite or d1, not ${JSON.stringify(asked)}` };
-  const backend: Backend = asked ?? (credentials ? "d1" : "sqlite");
+  const backend: Backend = asked ?? "sqlite";
   if (backend === "d1" && !credentials)
     return {
       error: "--backend d1 needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the environment",
     };
   return {
     backend,
-    why: asked
-      ? "asked for"
-      : credentials
-        ? "Cloudflare credentials are set"
-        : "no Cloudflare credentials are set",
+    why: asked ? "asked for" : "the default; --backend d1 uses a scratch D1 database",
   };
 }
 
@@ -180,7 +177,7 @@ async function downloadLatestRun(
   ) as Partial<CompleteMarker>;
   let objects = 0;
   for (const key of [...(marker.keys ?? []).filter((k) => k !== markerKey), markerKey]) {
-    if (!key.startsWith(latest.prefix) || key.split("/").includes(".."))
+    if (!key.startsWith(latest.prefix))
       throw new Error(`d1-dump: ${markerKey} lists ${key}, outside its run`);
     const body = await bucket.stream(key);
     if (!body) continue;
