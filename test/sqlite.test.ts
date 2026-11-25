@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { expect, test } from "vitest";
 import {
   D1_MAX_STATEMENT_BYTES,
   dumpDatabase,
@@ -10,15 +10,16 @@ import {
 } from "../src/index.js";
 import { pickBackend, sqliteScratch } from "../src/node.js";
 import {
-  SITE_ROWS,
-  SITE_SCHEMA,
   checkOf,
   exec,
+  LATER,
+  NOW,
+  rewriteTable,
   rows,
-  sandbox,
+  seededSandbox,
   statsOf,
   tableKey,
-  rewriteTable,
+  useSeededSandbox,
 } from "./helpers.js";
 
 // The same drill against the tokenless backend: a local SQLite file (node:sqlite).
@@ -26,16 +27,8 @@ import {
 let src: D1Like;
 let dst: D1Like;
 let bucket: R2Like;
-let dispose: () => Promise<void>;
 
-beforeEach(async () => {
-  ({ src, dst, bucket, dispose } = await sandbox());
-  await exec(src, [...SITE_SCHEMA, ...SITE_ROWS]);
-});
-afterEach(async () => dispose());
-
-const NOW = new Date("2026-09-27T09:00:00.000Z");
-const LATER = new Date("2026-09-27T10:00:00.000Z");
+useSeededSandbox((box) => ({ src, dst, bucket } = box));
 
 // A sqlite scratch backend that can rewrite statements, and reads a query from the copy
 // just before the drill deletes it.
@@ -193,9 +186,8 @@ test("a column the schema does not have is refused too, and an FTS5 table that c
     /settings row 0 .*not in the schema: extra/,
   );
 
-  const clean = await sandbox();
+  const clean = await seededSandbox();
   try {
-    await exec(clean.src, [...SITE_SCHEMA, ...SITE_ROWS]);
     const ok = await dumpDatabase(clean.src, clean.bucket, { now: NOW });
     await restoreDump(clean.dst, clean.bucket, ok.prefix);
     expect(

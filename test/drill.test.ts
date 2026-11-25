@@ -1,7 +1,7 @@
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { expect, test } from "vitest";
 import { cloudflareScratch } from "../src/cloudflare.js";
 import { directoryBucket, drillFilesFromBucket, drillFromBucket, pathInside } from "../src/node.js";
 import {
@@ -15,29 +15,22 @@ import {
   type R2Like,
 } from "../src/index.js";
 import {
-  SITE_ROWS,
-  SITE_SCHEMA,
   checkOf,
   exec,
+  LATER,
+  NOW,
   readText,
   rows,
   sandbox,
   statsOf,
+  useSeededSandbox,
 } from "./helpers.js";
 
 let src: D1Like;
 let dst: D1Like;
 let bucket: R2Like;
-let dispose: () => Promise<void>;
 
-beforeEach(async () => {
-  ({ src, dst, bucket, dispose } = await sandbox());
-  await exec(src, [...SITE_SCHEMA, ...SITE_ROWS]);
-});
-afterEach(async () => dispose());
-
-const NOW = new Date("2026-09-27T09:00:00.000Z");
-const LATER = new Date("2026-09-27T10:00:00.000Z");
+useSeededSandbox((box) => ({ src, dst, bucket } = box));
 
 // A scratch database that records whether the drill deleted it.
 function scratchOf(db: D1Like) {
@@ -168,8 +161,7 @@ test("a dropped FTS5 rebuild fails the fts and search checks, though every table
   expect(result.ok).toBe(false);
 });
 
-// foxhound's drill, 2026-10-31: a database with no FTS5 table failed "search" though every
-// table restored, so a backup that restores could never pass.
+// A database with no FTS5 table must not fail "search", or a backup that restores could never pass.
 test("a database with no FTS5 table passes search and says why", async () => {
   const plain = await sandbox();
   try {
