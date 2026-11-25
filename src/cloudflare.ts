@@ -68,7 +68,7 @@ export function cloudflareScratch(
   fetchImpl: typeof fetch = fetch,
 ): (name: string) => Promise<Scratch> {
   const call = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
-    const res = await fetchImpl(`${API}/accounts/${accountId}${path}`, {
+    const res = await fetchImpl(`${API}/accounts/${encodeURIComponent(accountId)}${path}`, {
       method,
       headers: { authorization: `Bearer ${apiToken}`, "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -121,6 +121,9 @@ export function cloudflareBucket(
     throw new Error("d1-dump: a bucket read over REST is read only");
   };
   const object = async (key: string): Promise<Response | null> => {
+    // The URL parser would resolve a dot segment into another bucket's path before it is sent.
+    if (key.split("/").some((part) => part === "." || part === ".."))
+      throw new Error(`d1-dump: refusing to read ${JSON.stringify(key)}: it has a dot segment`);
     const res = await fetchImpl(`${objects}/${key.split("/").map(encodeURIComponent).join("/")}`, {
       headers,
     });

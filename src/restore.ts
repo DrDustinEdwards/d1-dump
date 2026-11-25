@@ -5,7 +5,7 @@ import {
   type SchemaSidecar,
 } from "./dump.js";
 import { readDumpJson } from "./gzip.js";
-import { quoteIdent } from "./schema.js";
+import { quoteIdent, type SchemaEntry } from "./schema.js";
 import type { D1Like, D1Statement, R2Like } from "./types.js";
 
 // D1 binds at most 100 parameters to one statement.
@@ -20,6 +20,10 @@ export interface RestoreOptions {
   batchRows?: number;
   // Bound text and BLOB size after which a batch is sent, whatever its row count.
   batchBytes?: number;
+  // Restore a run written before 0.16.0, whose marker has no checksums, reading its objects
+  // unchecked. Off: a marker without `checksums` is refused, so dropping the field from a current
+  // marker cannot switch the checks off.
+  allowUnchecked?: boolean;
 }
 
 export interface RestoreResult {
@@ -77,7 +81,25 @@ function checkColumns(
   }
 }
 
-// Rebuilds one complete dump into `db`, which should be empty. Tables and FTS5 tables
+// Each schema entry runs as stored, so it must be the one CREATE its type names and nothing
+// else (an ATTACH, a DROP or an INSERT in `_schema.json` is refused).
+const CREATE_STATEMENT: Record<SchemaEntry["type"], RegExp> = {
+  table: /^\s*CREATE\s+(?:VIRTUAL\s+)?TABLE\b/i,
+  index: /^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b/i,
+  trigger: /^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TRIGGER\b/i,
+  view: /^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?VIEW\b/i,
+};
+
+async function createEntry(db: D1Like, e: SchemaEntry): Promise<void> {
+  if (!CREATE_STATEMENT[e.type]?.test(e.sql))
+    throw new Error(
+      `d1-dump: _schema.json holds a ${e.type} entry (${e.name}) that is not a CREATE ${e.type.toUpperCase()}`,
+    );
+  await db.prepare(e.sql).run();
+}
+
+// Rebuilds one complete dump into `db`, which must be empty: it throws before writing when `db`
+// already has a table, and a restore that fails leaves tables behind, so discard that database. Tables and FTS5 tables
 // first, then the rows (parents before children), then each external FTS5 index is
 // rebuilt, then indexes, triggers and views, so no trigger fires on restored rows.
 // Every table's count is checked against the marker, and so is every object's checksum when the marker has
@@ -98,6 +120,10 @@ export async function restoreDump(
       `d1-dump: ${prefix} has no readable ${COMPLETE_MARKER}, so it is not a complete dump (${err.message})`,
     );
   });
+  if (!marker.checksums && !options.allowUnchecked)
+    throw new Error(
+      `d1-dump: ${prefix}${COMPLETE_MARKER} has no checksums, so its objects cannot be verified; pass allowUnchecked for a run written before 0.16.0`,
+    );
   const { schema } = await readDumpJson<SchemaSidecar>(
     bucket,
     `${prefix}${SCHEMA_SIDECAR}`,
@@ -107,7 +133,14 @@ export async function restoreDump(
   const batchRows = options.batchRows ?? DEFAULT_BATCH_ROWS;
   const batchBytes = options.batchBytes ?? DEFAULT_BATCH_BYTES;
 
-  for (const e of schema.filter((s) => s.type === "table")) await db.prepare(e.sql).run();
+  const { results: held } = await db
+    .prepare(
+      "SELECT COUNT(*) AS n FROM sqlite_master WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'",
+    )
+    .all<{ n: number }>();
+  if (held[0]?.n)
+    throw new Error("d1-dump: the target database is not empty; restore into a new database");
+  for (const e of schema.filter((s) => s.type === "table")) await createEntry(db, e);
   const internalFts = new Set(marker.fts.filter((f) => f.mode === "internal").map((f) => f.name));
 
   const restored: RestoreResult["tables"] = [];
@@ -174,7 +207,7 @@ export async function restoreDump(
   }
 
   for (const type of ["index", "trigger", "view"] as const) {
-    for (const e of schema.filter((s) => s.type === type)) await db.prepare(e.sql).run();
+    for (const e of schema.filter((s) => s.type === type)) await createEntry(db, e);
   }
   return { tables: restored, rebuilt, empty };
 }

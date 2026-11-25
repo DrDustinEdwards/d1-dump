@@ -1,4 +1,11 @@
-import { dumpDatabase, writeCompleteMarker, type DumpOptions, type DumpResult } from "./dump.js";
+import {
+  DEFAULT_PREFIX,
+  dumpDatabase,
+  runIdFor,
+  writeCompleteMarker,
+  type DumpOptions,
+  type DumpResult,
+} from "./dump.js";
 import { pruneDumps, type PruneResult, type RetentionPolicy } from "./runs.js";
 import { quoteIdent, readPlan, type SchemaEntry } from "./schema.js";
 import type { D1Like, R2Like } from "./types.js";
@@ -10,9 +17,9 @@ export interface BackupOptions extends Omit<DumpOptions, "markComplete"> {
   excludeIfPresent?: string[];
   // Refuse a dump that carries a column whose name says it holds a credential (CREDENTIAL_COLUMN,
   // or `pattern`). Such a table is excluded, its column renamed, or the column listed in `allow`
-  // as "table.column" with the reason it is safe to keep. Off unless set, so a release never
-  // turns a site's nightly run incomplete on its own.
-  credentials?: true | { pattern?: RegExp; allow?: Record<string, string> };
+  // as "table.column" with the reason it is safe to keep. On by default; `false` turns it off.
+  // It runs before anything is written, so a refused run leaves no object behind.
+  credentials?: boolean | { pattern?: RegExp; allow?: Record<string, string> };
   // Tables that must be in the dump: the ones that hold what exists nowhere else.
   required?: string[];
   // Tables counted live straight after the dump. Each must be dumped with exactly its live row
@@ -32,7 +39,8 @@ export interface BackupResult {
 }
 
 // A run that failed its checks. Its objects stay as evidence, without the marker, so it is
-// never the newest dump and the health age keeps growing until a good run lands.
+// never the newest dump and the health age keeps growing until a good run lands. A run refused
+// for a credential column wrote nothing: `dump.keys` is empty.
 export class BackupIncomplete extends Error {
   constructor(
     readonly dump: DumpResult,
@@ -62,9 +70,10 @@ export function standardProblems(
 }
 
 // A column name that says it holds a credential, camelCase included: a password, secret, token,
-// API or private key, or the hash of a refresh token or one-time code.
+// API, access, encryption, signing or private key, a passphrase, or the hash of a refresh token,
+// one-time code or recovery code.
 export const CREDENTIAL_COLUMN =
-  /password|passwd|secret|token|api_?key|credential|private_?key|refresh_?hash|code_?hash/i;
+  /password|passwd|passphrase|secret|token|(?:api|access|encryption|signing|private)_?key|credential|refresh_?hash|code_?hash|recovery_?code|(?:^|_)otp(?:_|$)|(?:^|_)jwt(?:_|$)/i;
 
 // The column names a CREATE TABLE statement declares, constraints left out.
 export function columnNames(sql: string): string[] {
@@ -86,7 +95,8 @@ export function columnNames(sql: string): string[] {
   const names: string[] = [];
   for (const part of parts) {
     const text = part.trim();
-    if (!text || /^(constraint|primary|unique|foreign|check)\b/i.test(text)) continue;
+    // A constraint, or an FTS5 option such as tokenize='porter', is not a column.
+    if (!text || /^(constraint|primary|unique|foreign|check)\b|^\w+\s*=/i.test(text)) continue;
     const match = /^(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|(\S+))/.exec(text);
     const name = match?.[1] ?? match?.[2] ?? match?.[3] ?? match?.[4];
     if (name) names.push(name);
@@ -96,7 +106,7 @@ export function columnNames(sql: string): string[] {
 
 // Each dumped table with a credential-looking column not in `allow` ("table.column"), named.
 export function credentialProblems(
-  dump: Pick<DumpResult, "tables">,
+  dump: { tables: Array<{ name: string }> },
   schema: SchemaEntry[],
   options: { pattern?: RegExp; allow?: Record<string, string> } = {},
 ): string[] {
@@ -104,8 +114,7 @@ export function credentialProblems(
   const held = new Set(dump.tables.map((t) => t.name));
   const problems: string[] = [];
   for (const entry of schema) {
-    if (entry.type !== "table" || !held.has(entry.name) || /^\s*CREATE\s+VIRTUAL/i.test(entry.sql))
-      continue;
+    if (entry.type !== "table" || !held.has(entry.name)) continue;
     const found = columnNames(entry.sql).filter(
       (c) => pattern.test(c) && !options.allow?.[`${entry.name}.${c}`],
     );
@@ -133,8 +142,9 @@ async function countProblems(db: D1Like, dump: DumpResult, counted: string[]): P
   return problems;
 }
 
-// The nightly backup: dump without the marker, run the standard and the site's checks, then
-// write the marker and prune. Prune runs only after a marker, so a failing night deletes nothing.
+// The nightly backup: refuse a credential column before anything is written, dump without the
+// marker, run the standard and the site's checks, then write the marker and prune. Prune runs
+// only after a marker, so a failing night deletes nothing.
 export async function runCheckedBackup(
   db: D1Like,
   bucket: R2Like,
@@ -146,26 +156,56 @@ export async function runCheckedBackup(
     check,
     retention,
     excludeIfPresent = [],
-    credentials,
+    credentials = true,
     ...dumpOptions
   } = options;
-  const plan = excludeIfPresent.length > 0 || credentials ? await readPlan(db) : undefined;
-  const present = new Set([...(plan?.tables ?? []), ...(plan?.fts ?? []).map((f) => f.name)]);
+  const plan = await readPlan(db);
+  const present = new Set([...plan.tables, ...plan.fts.map((f) => f.name)]);
   const exclude = [
     ...new Set([
       ...(dumpOptions.exclude ?? []),
       ...excludeIfPresent.filter((name) => present.has(name)),
     ]),
   ];
+  if (credentials) {
+    const dumped = [
+      ...plan.tables,
+      ...plan.fts.filter((f) => f.mode === "internal").map((f) => f.name),
+    ]
+      .filter((name) => !exclude.includes(name))
+      .map((name) => ({ name }));
+    const refused = credentialProblems(
+      { tables: dumped },
+      plan.schema,
+      credentials === true ? {} : credentials,
+    );
+    if (refused.length > 0) {
+      const now = dumpOptions.now ?? new Date();
+      const prefix = dumpOptions.prefix ?? DEFAULT_PREFIX;
+      const run_id = runIdFor(now);
+      throw new BackupIncomplete(
+        {
+          run_id,
+          prefix: `${prefix}${run_id}/`,
+          exported_at: now.toISOString(),
+          keys: [],
+          tables: [],
+          fts: plan.fts,
+          excluded: exclude,
+          checksums: {},
+          shadow_skipped: plan.shadow,
+          complete: false,
+        },
+        refused,
+      );
+    }
+  }
   const dump = await dumpDatabase(db, bucket, { ...dumpOptions, exclude, markComplete: false });
   const problems = [
     ...standardProblems(dump, {
       exclude: [...exclude, ...excludeIfPresent],
       required: [...new Set([...(required ?? []), ...counted])],
     }),
-    ...(credentials && plan
-      ? credentialProblems(dump, plan.schema, credentials === true ? {} : credentials)
-      : []),
     ...(await countProblems(db, dump, counted)),
     ...((await check?.(dump)) ?? []),
   ];

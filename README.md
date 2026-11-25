@@ -6,10 +6,10 @@ Each site installs it. D1 Time Travel already restores any minute of the last 30
 
 ## Install
 
-Installed by git tag, never from a registry:
+Installed by git tag, never from a registry. Use the newest tag on the [releases page](https://github.com/DrDustinEdwards/d1-dump/releases):
 
 ```sh
-npm install github:DrDustinEdwards/d1-dump#v0.15.0
+npm install --save-exact github:DrDustinEdwards/d1-dump#v<latest release>
 ```
 
 npm builds `dist/` on install through the `prepare` script. It needs no Cloudflare type package and no `nodejs_compat`.
@@ -17,21 +17,22 @@ npm builds `dist/` on install through the `prepare` script. It needs no Cloudfla
 ## Dump nightly
 
 ```ts
-import { dumpDatabase, pruneDumps } from "@dustinedwards/d1-dump";
+import { runCheckedBackup } from "@dustinedwards/d1-dump";
 
 export default {
   async scheduled(_event, env) {
-    await dumpDatabase(env.DB, env.BACKUPS); // the site's own D1 and R2 bindings
-    await pruneDumps(env.BACKUPS); // 14 daily, 8 weekly, 6 monthly; the newest complete run always kept
+    // The site's own D1 and R2 bindings. Refuses a credential column before it writes, marks the run complete,
+    // then prunes: 14 daily, 8 weekly, 6 monthly; the newest complete run always kept.
+    await runCheckedBackup(env.DB, env.BACKUPS, { exclude: ["session"] });
   },
 };
 ```
 
-Each run writes `backups/json/<run id>/<table>.json` (`{exported_at, table, rows}`) for every table, `_schema.json` (the CREATE statements), and then `_complete.json`. The marker is written last, so a run without it did not finish. It lists every object's SHA-256 under `checksums` (`sha256:<hex>`, or S3's composite `sha256-<chunks>:<hex>` for an object over 8 MiB, hashed as it streams). A single-chunk object is also sent with its SHA-256, so R2 refuses an upload that arrived damaged. `restoreDump`, `readDumpJson(bucket, key, missing, marker.checksums)` and the drill check them on read, so a table changed or cut short after the dump fails even with its row count intact. This catches damage, not a writer who can also rewrite the marker. A run written before 0.16.0 has no checksums and is read unchecked; the drill says so. The tables are read from `sqlite_master`, so a table added by a migration is dumped with no list to edit.
+Each run writes `backups/json/<run id>/<table>.json` (`{exported_at, table, rows}`) for every table, `_schema.json` (the CREATE statements), and then `_complete.json`. The marker is written last, so a run without it did not finish. It lists every object's SHA-256 under `checksums` (`sha256:<hex>`, or S3's composite `sha256-<chunks>:<hex>` for an object over 8 MiB, hashed as it streams). A single-chunk object is also sent with its SHA-256, so R2 refuses an upload that arrived damaged. `restoreDump`, `readDumpJson(bucket, key, missing, marker.checksums)` and the drill check them on read, so a table changed or cut short after the dump fails even with its row count intact. This catches damage, not a writer who can also rewrite the marker. A run written before 0.16.0 has no checksums: `restoreDump` refuses it unless the caller passes `allowUnchecked`, and the drill fails it. The tables are read from `sqlite_master`, so a table added by a migration is dumped with no list to edit.
 
 - **FTS5.** Shadow tables are never dumped. An external-content FTS5 table (`content='posts'`) is rebuilt from its content table on restore. An internal-content one is dumped through its columns with its rowid. A contentless one (`content=''`) holds no text, so it is restored empty and reported. Any other virtual table fails the run.
 - **One instant.** Every table is read in one D1 batch, which is one transaction. A table too large to hold in memory can be named in `paged` if it is append-only with a growing integer id. Its rows up to the snapshot's `MAX(id)` are then read in pages and streamed to R2 as a multipart object, and the dump fails, writing no marker, unless the pages held exactly the row count the snapshot saw (a repeated id or a delete mid-dump would lose rows).
-- **Options.** `prefix`, `paged`, `exclude` (a name that is not a table fails the run), `sidecars` (extra `_<name>.json` objects written before the marker), and `compress`.
+- **Options.** `prefix`, `paged`, `exclude` (a name that is not a table fails the run; the table's rows are left out but its CREATE statement stays in `_schema.json`, so a restore creates it empty), `sidecars` (extra `_<name>.json` objects written before the marker), and `compress`.
 - **Compression.** With `compress: true` each table is written as `<table>.json.gz`, the same JSON gzipped (several times smaller; a paged table is compressed as it streams). `_schema.json`, the sidecars and `_complete.json` stay plain, and the marker lists the `.gz` keys. `restoreDump` and the drill read both kinds, so a bucket can hold plain and compressed runs while the old ones age out. A bucket object read through `get` needs `arrayBuffer()` to read a `.gz` key (an R2 binding has it). `readDumpJson(bucket, key, missing, checksums?)` reads one table of either kind. To restore by hand, `gunzip` the table files.
 - **BLOBs** are written as D1 returns them, an array of byte values, which D1 stores back as a BLOB. Integers beyond 2^53 lose precision, as they do everywhere in D1's JavaScript API.
 
@@ -119,12 +120,12 @@ From a seat with no Worker, one file goes back with wrangler: `npx wrangler r2 o
 import { latestDump, restoreDump } from "@dustinedwards/d1-dump";
 
 const latest = await latestDump(env.BACKUPS);
-await restoreDump(env.SCRATCH_DB, env.BACKUPS, latest.prefix); // into an EMPTY database
+await restoreDump(env.SCRATCH_DB, env.BACKUPS, latest.prefix); // into an EMPTY database; it throws on one that has a table
 ```
 
-`restoreDump` creates the tables, refuses any table whose rows do not carry exactly the columns its `CREATE` statement in `_schema.json` has (a column missing from every row is caught, not only one missing from some), inserts the rows parents first under `PRAGMA defer_foreign_keys`, rebuilds external FTS5 indexes, and only then creates indexes, triggers and views, so no trigger fires on restored rows. It checks every table's count against the marker and throws on a mismatch.
+`restoreDump` runs each `_schema.json` entry only if it is the one CREATE its type names, and creates the tables, refuses any table whose rows do not carry exactly the columns its `CREATE` statement in `_schema.json` has (a column missing from every row is caught, not only one missing from some), inserts the rows parents first under `PRAGMA defer_foreign_keys`, rebuilds external FTS5 indexes, and only then creates indexes, triggers and views, so no trigger fires on restored rows. It checks every table's count against the marker and throws on a mismatch.
 
-**Size limit.** `restoreDump` reads one table's file whole (paging applies only to the dump), so a table file over about 40 MB will not restore inside a Worker. Restore it from Node instead, against a local D1 through Miniflare as the tests do. The figures are under "Largest table it can restore" below.
+**Size limit.** `restoreDump` reads one table's file whole (paging applies only to the dump), so a table file over about 40 MB will not restore inside a Worker. A gzip table file is read up to 64 MiB decoded and refused past that. Restore it from Node instead, against a local D1 through Miniflare as the tests do. The figures are under "Largest table it can restore" below.
 
 ## Complete only after your own checks
 
@@ -139,11 +140,11 @@ await runCheckedBackup(env.DB, env.BACKUPS, {
   counted: ["posts"], // required too, and its dumped rows must equal a live count
   check: (dump) => [], // the site's own checks, one message per failure
   excludeIfPresent: ["account"], // excluded while it exists; a migration may already have dropped it
-  credentials: { allow: { "posts.token_count": "a count, not a token" } }, // or true
+  credentials: { allow: { "posts.token_count": "a count, not a token" } }, // or true; on unless `credentials: false`
 });
 ```
 
-`excludeIfPresent` is for a credential table a migration is dropping: it is excluded when it exists and skipped when it does not, so the run passes whether the deploy or the migration lands first (a name in `exclude` that is not a table fails the run). `credentials` refuses a dump that carries a column whose name says it holds a credential (`CREDENTIAL_COLUMN`: password, secret, token, API or private key, or a refresh token's or one-time code's hash; `pattern` replaces it): exclude the table, rename the column, or list it in `allow` as `"table.column"` with the reason it is safe. It is off unless set, so a release never leaves a site's nightly run incomplete on its own. `credentialProblems` and `columnNames` are the same check on their own.
+`excludeIfPresent` is for a credential table a migration is dropping: it is excluded when it exists and skipped when it does not, so the run passes whether the deploy or the migration lands first (a name in `exclude` that is not a table fails the run). `credentials` refuses a dump that carries a column whose name says it holds a credential (`CREDENTIAL_COLUMN`: password, passphrase, secret, token, API, access, encryption, signing or private key, a refresh token's, one-time code's or recovery code's hash; `pattern` replaces it): exclude the table, rename the column, or list it in `allow` as `"table.column"` with the reason it is safe. It is on unless `credentials: false`, and it runs before anything is written, so a refused run leaves no object in the bucket (`BackupIncomplete.dump.keys` is empty). It reads FTS5 columns too; `sidecars` are the caller's JSON and are not scanned. `credentialProblems` and `columnNames` are the same check on their own.
 
 The standard checks refuse an empty dump, an excluded table in the dump and a missing required one. Each `counted` table is counted again straight after the dump and must match what was dumped, and the run is refused if every counted table dumped empty, since an emptied database matches its own counts. Count only tables the operator writes: a reader's write between the dump and the count fails the night. A failed check throws `BackupIncomplete` (with `dump` and `problems`), leaves the run without its marker and prunes nothing, so the scheduled run fails and the health age keeps growing. `standardProblems` is the same checks on their own. For a different order, call the pieces yourself:
 
@@ -190,7 +191,7 @@ CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... npx d1-dump drill --bucket <b
 
 `--bucket` lists the bucket through Cloudflare's R2 REST API, downloads the newest complete run under `--prefix` (default `backups/json/`) and nothing else, the objects its marker lists and then the marker, into a temporary directory, and drills it with sqlite. The token needs only R2 read on the bucket. It is sent only as the Authorization header and never printed. The directory is removed afterwards. The first line says what happened, and the exit code matches it: 0 `restore drill PASSED`, 1 `restore drill FAILED` (a check failed, including no complete run in the bucket), 3 `restore drill could not run` (no credentials, or the API refused or failed). `--backend d1` and `--max-age-hours` work as they do with `--dir`.
 
-With `--dir` and no `--backend`, the drill uses sqlite unless both Cloudflare variables are set, and its first output line says which ran and why (`backend: sqlite (no Cloudflare credentials are set)`). `--backend d1` without the variables is an error. The sqlite backend uses `node:sqlite`, built into Node (unflagged since 22.13; this package already requires Node 24.14.1), so it adds no dependency. Its scratch file lives in its own temporary directory, named `restore-drill-<date>-<pid>`, and the `scratch` check fails if the directory is still there after the delete. A batch is one transaction, as D1's is, and a BLOB comes back as a BLOB.
+With `--dir` and no `--backend`, the drill uses sqlite even when the Cloudflare variables are set, and its first output line says which ran and why. `--backend d1` without the variables is an error. The sqlite backend uses `node:sqlite`, built into Node (unflagged since 22.13; this package already requires Node 24.14.1), so it adds no dependency. Its scratch file lives in its own temporary directory, named `restore-drill-<date>-<pid>`, and the `scratch` check fails if the directory is still there after the delete. A batch is one transaction, as D1's is, and a BLOB comes back as a BLOB.
 
 The d1 backend's token needs to create and delete D1 databases, and that permission covers every database in the account, so keep it out of scheduled CI. It is read from the environment, sent only as the Authorization header, and never printed. `--prefix backups/json/<run id>/` pins a run (the newest complete one is used otherwise) and `--max-age-hours off` skips the freshness check. The exit code is 1 when any check fails.
 
