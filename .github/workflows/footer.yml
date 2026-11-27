@@ -1,0 +1,20 @@
+name: footer
+
+# The footer strip on an edit of a pull request's description, apart from the checks (devkit examples/footer-caller.yml).
+# An edit adds no commits, so it no longer reruns checks.yml; Renovate's own edits skip the job and take no runner.
+
+on:
+  pull_request:
+    types: [edited]
+
+permissions: {}
+
+jobs:
+  footer:
+    if: github.actor != 'renovate[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: DrDustinEdwards/devkit/.github/actions/footer@19b78ba55081c1e032a87b71e6270aa8e64235ea # v0.66.0

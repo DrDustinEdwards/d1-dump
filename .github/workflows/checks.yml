@@ -11,7 +11,7 @@ name: checks
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, edited, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review]
   merge_group:
   # Once a day on the default branch: the shared-code check judges the repository's state there, which a pull request's
   # run leaves to it (devkit pr.yml, "THE CALLER"). A red run is Capsid's job for this repository.
