@@ -17,4 +17,4 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: DrDustinEdwards/devkit/.github/actions/footer@19b78ba55081c1e032a87b71e6270aa8e64235ea # v0.66.0
+      - uses: DrDustinEdwards/devkit/.github/actions/footer@22893f4b81049f7eeb019864e7e73257b1b7892f # v0.67.0
