@@ -8,10 +8,9 @@ it adds a changeset, a short Markdown file here that says what changed and how b
 
 Write the text as the CHANGELOG entry it becomes. CI fails a pull request with none.
 
-A release is its own pull request, made when a consumer needs what has merged:
-
-    git switch -c release main && npx changeset version
-
-That sets package.json's version from the waiting changesets, writes their text into CHANGELOG.md and deletes them.
-Merging it is the release: `.github/workflows/release.yml` tags `vX.Y.Z`, publishes the GitHub release and starts the
-consumer bumps. Several merged changes go out in one release, so the consumers repin once.
+A release is its own pull request, and nobody makes it by hand. Once a day devkit's release-batch workflow runs
+`npx changeset version` for every package with changesets waiting, checks the consumers against the candidate and opens
+"Release X.Y.Z", which merges itself when its checks pass. Merging it is the release: `.github/workflows/release.yml`
+tags `vX.Y.Z`, publishes the GitHub release and starts the consumer bumps. Everything merged that day goes out in one
+release, so the consumers repin once. An urgent release is a manual run of devkit's release-batch workflow with this
+repository's name as its input.
