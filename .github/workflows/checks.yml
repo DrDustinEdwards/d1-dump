@@ -11,7 +11,7 @@ name: checks
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, edited, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review]
   merge_group:
   # Once a day on the default branch: the shared-code check judges the repository's state there, which a pull request's
   # run leaves to it (devkit pr.yml, "THE CALLER"). A red run is Capsid's job for this repository.
@@ -37,7 +37,7 @@ jobs:
       pull-requests: write
       id-token: write
       checks: write
-    uses: DrDustinEdwards/devkit/.github/workflows/pr.yml@1f8d35b63b7e78eabbef60752f798513646fe9b9 # v0.64.0
+    uses: DrDustinEdwards/devkit/.github/workflows/pr.yml@22893f4b81049f7eeb019864e7e73257b1b7892f # v0.67.0
     with:
       review: true
       # A library, not a Worker.
