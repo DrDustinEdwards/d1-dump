@@ -29,6 +29,16 @@
             "command": "h=\"$CLAUDE_PROJECT_DIR/node_modules/@dustinedwards/devkit/claude/hooks/scoped-git-add.sh\"; [ -f \"$h\" ] && exec bash \"$h\"; grep -Eq '\"command\" *: *\"npm (ci|install)( --?[a-z-]+)*\"' && exit 0; echo \"devkit is not installed, so the shared Claude Code hooks cannot run and this call is BLOCKED: run npm ci first.\" >&2; exit 2"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 600,
+            "command": "h=\"$CLAUDE_PROJECT_DIR/node_modules/@dustinedwards/devkit/claude/hooks/pre-push.sh\"; [ -f \"$h\" ] && exec bash \"$h\"; exit 0"
+          }
+        ]
       }
     ]
   },
